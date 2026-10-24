@@ -135,7 +135,7 @@ def resolve_tests(client: TestClient) -> None:
     check("the email it started from is marked Done", db.get_record("inbox_messages", mail.id).status == "Done")
     act = changes.list_activity(YBVS)
     check(f"logged: '{act[0]['summary'][:80]}…'", len(act) == before + 1 and act[0]["action"] == "resolve" and "AI Agents & Enterprise SaaS" in act[0]["summary"])
-    check("the run now shows as approved", client.get(f"{E}/crisis/runs").json()["runs"][0]["committed"] is True)
+    check("the run now shows as approved", next(x for x in client.get(f"{E}/crisis/runs").json()["runs"] if x["run_id"] == run_id)["committed"] is True)
     check("approving twice is refused (409)", client.post(f"{E}/crisis/commit", json={"run_id": run_id}).status_code == 409)
     ics = client.get(f"{E}/calendar.ics?only_updated=true")
     check("the calendar update (.ics) has the moved session", ics.status_code == 200 and "AI Agents & Enterprise SaaS" in ics.text)
