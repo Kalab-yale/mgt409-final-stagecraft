@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stagecraft AI · Mission Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            obsidian: '#0B0F19', panel: '#111827', panel2: '#1E293B', line: '#334155',
+            accent: '#6366F1', ok: '#10B981', warn: '#F59E0B', bad: '#EF4444',
+          },
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="h-full bg-obsidian text-slate-200 font-sans antialiased">
+<div class="flex h-screen overflow-hidden">
+
+  <!-- ===== Left sidebar: brand, event workspace, actions ===== -->
+  <aside class="w-72 shrink-0 border-r border-line bg-[#0D1220] flex flex-col" aria-label="Event workspace">
+    <div class="px-5 pt-5 pb-4 border-b border-line">
+      <div class="flex items-center gap-2.5">
+        <div class="h-8 w-8 rounded-lg bg-accent/15 border border-accent/40 grid place-items-center text-accent">
+          <i data-lucide="radar" class="h-4 w-4"></i>
+        </div>
+        <div>
+          <div class="text-[13px] font-bold tracking-[0.18em] text-white">STAGECRAFT AI</div>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <span class="live-dot"></span>
+            <span class="font-mono text-[10px] tracking-widest text-ok">LIVE OPS</span>
+            <span class="font-mono text-[10px] text-slate-500">v{{ app_version }}</span>
+          </div>
+        </div>
+      </div>
+      <button id="btn-new-event" class="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-accent hover:bg-indigo-500 text-white text-sm font-medium py-2 transition focus-ring">
+        <i data-lucide="plus" class="h-4 w-4"></i> New Event
+      </button>
+    </div>
+
+    <div class="px-5 pt-4 pb-2 flex items-center justify-between">
+      <span class="text-[10px] font-semibold tracking-[0.16em] text-slate-500">WORKSPACE · EVENTS</span>
+      <span id="event-count" class="font-mono text-[10px] text-slate-500"></span>
+    </div>
+    <nav id="event-list" class="flex-1 overflow-y-auto px-3 pb-3 space-y-1.5"></nav>
+
+    <div class="p-3 border-t border-line space-y-1.5">
+      <button id="btn-reset" class="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-panel2 transition focus-ring">
+        <i data-lucide="rotate-ccw" class="h-4 w-4 text-slate-400"></i> Reset Demo Data
+      </button>
+      <button id="btn-settings" class="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-panel2 transition focus-ring">
+        <i data-lucide="settings-2" class="h-4 w-4 text-slate-400"></i> Settings, Tokenomics &amp; Guardrails
+      </button>
+    </div>
+  </aside>
+
+  <!-- ===== Main column ===== -->
+  <main class="flex-1 min-w-0 min-h-0 flex flex-col">
+
+    <!-- Tactical telemetry bar -->
+    <header class="border-b border-line bg-panel/70 backdrop-blur px-6 pt-4 pb-0">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <h1 id="event-name" class="text-xl font-semibold text-white truncate">Loading…</h1>
+            <span id="event-status" class="pill hidden"></span>
+          </div>
+          <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400">
+            <span class="flex items-center gap-1.5"><i data-lucide="map-pin" class="h-3.5 w-3.5"></i><span id="venue-line">—</span></span>
+            <span class="flex items-center gap-1.5"><i data-lucide="plane" class="h-3.5 w-3.5"></i><span id="corridor-line" class="font-mono text-xs">—</span></span>
+            <span class="flex items-center gap-1.5"><i data-lucide="calendar" class="h-3.5 w-3.5"></i><span id="date-line" class="font-mono text-xs">—</span></span>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-stretch gap-2" id="telemetry-tiles">
+          <div class="tile"><div class="tile-label">WEATHER · CORRIDOR RISK</div><div id="weather-badge" class="tile-value text-slate-400">checking…</div></div>
+          <div class="tile"><div class="tile-label">ATTENDEES</div><div id="attendee-count" class="tile-value font-mono">—</div></div>
+          <div class="tile"><div class="tile-label">CATERING SLA</div><div id="catering-badge" class="tile-value">—</div></div>
+          <div class="tile"><div class="tile-label">CONFLICTS</div><div id="conflict-badge" class="tile-value font-mono">—</div></div>
+        </div>
+      </div>
+
+      <nav class="mt-4 flex items-end gap-1 overflow-x-auto" role="tablist" aria-label="Views">
+        <button class="view-tab active" data-view="ros" role="tab" aria-selected="true">
+          <span class="font-mono text-[11px] text-slate-500">[1]</span> Master Run-of-Show &amp; Venue Deck
+        </button>
+        <button class="view-tab" data-view="warroom" role="tab" aria-selected="false">
+          <span class="font-mono text-[11px] text-slate-500">[2]</span> Crisis War-Room Resolver
+        </button>
+        <a id="public-link" class="view-tab" href="#" target="_blank" rel="noopener">
+          <span class="font-mono text-[11px] text-slate-500">[3]</span> Public Attendee Live Page <i data-lucide="arrow-up-right" class="h-3.5 w-3.5 inline"></i>
+        </a>
+      </nav>
+    </header>
+
+    <div id="main-scroll" class="relative flex-1 min-h-0 overflow-y-auto">
+      <!-- View 1: Venue deck + run-of-show -->
+      <section id="view-ros" class="p-6 space-y-6">
+        <div>
+          <div class="section-title"><i data-lucide="building-2" class="h-4 w-4"></i> Venue Room Utilization Deck</div>
+          <div id="room-deck" class="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]"></div>
+        </div>
+
+        <div>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="section-title"><i data-lucide="list-checks" class="h-4 w-4"></i> Master Run-of-Show</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <div id="track-filters" class="flex flex-wrap gap-1.5" role="group" aria-label="Filter by track"></div>
+              <label class="sr-only" for="room-filter">Filter by room</label>
+              <select id="room-filter" class="input-dark text-xs py-1.5"></select>
+              <span id="session-count" class="font-mono text-xs text-slate-500"></span>
+            </div>
+          </div>
+          <div class="mt-3 rounded-xl border border-line overflow-hidden">
+            <div class="ros-grid ros-head">
+              <div>TIME</div><div>SESSION</div><div>ROOM · LOAD</div><div>SPEAKERS</div><div>REQUIRED AV</div>
+            </div>
+            <div id="ros-body"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View 2: Crisis War-Room Resolver -->
+      <section id="view-warroom" class="p-6 pb-20 space-y-5 hidden">
+        <div class="grid gap-5 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+          <div class="rounded-xl border border-line bg-panel p-5">
+            <div class="section-title"><i data-lucide="siren" class="h-4 w-4"></i> Inbound Crisis Command Deck</div>
+            <p class="mt-1 text-xs text-slate-500">One-click presets for this event. Click one to load it, edit if you like, then dispatch.</p>
+            <div id="crisis-preset-list" class="mt-3 grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]"></div>
+          </div>
+          <div class="rounded-xl border border-line bg-panel p-5 flex flex-col">
+            <label for="crisis-text" class="section-title"><i data-lucide="terminal-square" class="h-4 w-4"></i> Crisis Command</label>
+            <textarea id="crisis-text" rows="7" class="input-dark w-full mt-3 flex-1 text-[13px] leading-relaxed" placeholder="Paste or type a live ops alert, e.g. a delayed keynote, a failed projector, a catering overrun…"></textarea>
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+                <input id="cost-saver" type="checkbox" checked class="h-4 w-4 accent-indigo-500"> Cost-Saver context <span class="text-slate-600">(compact, cache-friendly)</span>
+              </label>
+              <button id="dispatch" class="btn-primary"><span class="spinner hidden"></span><i data-lucide="zap" class="h-4 w-4"></i> Dispatch Multi-Agent War-Room</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-line bg-panel p-5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="section-title"><i data-lucide="workflow" class="h-4 w-4"></i> Agent Pipeline &amp; Handoff Trace</div>
+            <span id="pipeline-meta" class="font-mono text-xs text-slate-500">standby</span>
+          </div>
+          <div id="pipeline" class="pipeline mt-4"></div>
+          <div id="pipeline-alerts" class="mt-3 space-y-2"></div>
+        </div>
+
+        <div id="warroom-result" class="space-y-5"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- ===== New Event modal (3 tabs) ===== -->
+<div id="modal-new-event" class="fixed inset-0 z-40 hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" data-close></div>
+  <div class="relative mx-auto mt-[6vh] w-[min(760px,94vw)] max-h-[88vh] overflow-y-auto rounded-2xl border border-line bg-panel shadow-2xl">
+    <div class="flex items-center justify-between px-6 pt-5">
+      <div>
+        <h2 id="modal-title" class="text-lg font-semibold text-white">New Event</h2>
+        <p class="text-sm text-slate-400">Create an event anywhere in the world: describe it, import a schedule, or clone a template.</p>
+      </div>
+      <button class="rounded-lg p-2 text-slate-400 hover:bg-panel2 focus-ring" data-close aria-label="Close"><i data-lucide="x" class="h-5 w-5"></i></button>
+    </div>
+    <div class="px-6 mt-4 flex gap-1 border-b border-line" role="tablist">
+      <button class="modal-tab active" data-tab="ai" role="tab"><i data-lucide="sparkles" class="h-4 w-4"></i> Talk to AI Architect</button>
+      <button class="modal-tab" data-tab="csv" role="tab"><i data-lucide="file-spreadsheet" class="h-4 w-4"></i> Import Schedule CSV</button>
+      <button class="modal-tab" data-tab="clone" role="tab"><i data-lucide="copy" class="h-4 w-4"></i> Clone Venue Template</button>
+    </div>
+
+    <!-- Tab 1: AI architect -->
+    <div class="modal-pane p-6 space-y-4" data-pane="ai">
+      <label for="ai-prompt" class="field-label">Describe your event</label>
+      <textarea id="ai-prompt" rows="6" class="input-dark w-full" placeholder="e.g. A 300-person fintech summit at the Skylight convention center in Addis Ababa on 2027-03-12 with a keynote, three panels and a lunch…"></textarea>
+      <div class="flex flex-wrap gap-2" id="ai-examples"></div>
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-xs text-slate-500">Onboarding Architect agent · ~15 s · <span class="font-mono">≈ $0.002</span> · prompt screened by the injection firewall</span>
+        <button id="ai-generate" class="btn-primary"><span class="spinner hidden"></span><i data-lucide="wand-sparkles" class="h-4 w-4"></i> Generate Event Blueprint with AI</button>
+      </div>
+      <div id="ai-result"></div>
+    </div>
+
+    <!-- Tab 2: CSV import -->
+    <div class="modal-pane p-6 space-y-4 hidden" data-pane="csv">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label for="csv-venue" class="field-label">Venue</label>
+          <select id="csv-venue" class="input-dark w-full"></select>
+        </div>
+        <div id="csv-custom-fields" class="sm:col-span-2 grid gap-3 sm:grid-cols-3 hidden">
+          <div><label for="csv-city" class="field-label">City</label><input id="csv-city" class="input-dark w-full" placeholder="Boston, MA"></div>
+          <div><label for="csv-venue-name" class="field-label">Venue name</label><input id="csv-venue-name" class="input-dark w-full" placeholder="Hynes Convention Center"></div>
+          <div><label for="csv-corridor" class="field-label">Airport / rail corridor</label><input id="csv-corridor" class="input-dark w-full font-mono text-xs" placeholder="BOS / South Station"></div>
+          <p class="sm:col-span-3 text-xs text-slate-500">The city is geocoded (free Open-Meteo API) so live weather works; rooms are created from the CSV's room names.</p>
+        </div>
+        <div class="sm:col-span-2"><label for="csv-name" class="field-label">Event name</label><input id="csv-name" class="input-dark w-full" placeholder="Yale Healthcare AI Day 2027"></div>
+        <div><label for="csv-date" class="field-label">Date</label><input id="csv-date" type="date" class="input-dark w-full font-mono"></div>
+        <div><label for="csv-attendees" class="field-label">Attendees</label><input id="csv-attendees" type="number" min="1" class="input-dark w-full font-mono" value="300"></div>
+      </div>
+      <div>
+        <div class="flex items-center justify-between">
+          <label for="csv-text" class="field-label">Sessions CSV</label>
+          <div class="flex items-center gap-2">
+            <button id="csv-sample" class="btn-ghost text-xs" type="button">Load sample</button>
+            <label class="btn-ghost text-xs cursor-pointer">Upload .csv<input id="csv-file" type="file" accept=".csv,text/csv" class="hidden"></label>
+          </div>
+        </div>
+        <textarea id="csv-text" rows="8" class="input-dark w-full font-mono text-xs" placeholder="title,track,room_name,start_time,end_time,expected_attendance,speaker_name"></textarea>
+        <p class="mt-1 text-xs text-slate-500">Tracks: Keynote · Venture &amp; Capital · Tech &amp; AI · Founder Workshop · Catering &amp; Networking. Several speakers: separate with <span class="font-mono">;</span></p>
+      </div>
+      <div class="flex justify-end"><button id="csv-submit" class="btn-primary"><span class="spinner hidden"></span><i data-lucide="upload" class="h-4 w-4"></i> Validate &amp; Import</button></div>
+      <div id="csv-result"></div>
+    </div>
+
+    <!-- Tab 3: Clone template -->
+    <div class="modal-pane p-6 space-y-4 hidden" data-pane="clone">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="sm:col-span-2"><label for="clone-template" class="field-label">Template event (venue + programme are copied)</label><select id="clone-template" class="input-dark w-full"></select></div>
+        <div class="sm:col-span-2"><label for="clone-name" class="field-label">New event name</label><input id="clone-name" class="input-dark w-full" placeholder="Yale Black Venture Summit 2027"></div>
+        <div><label for="clone-date" class="field-label">Date</label><input id="clone-date" type="date" class="input-dark w-full font-mono"></div>
+        <div><label for="clone-attendees" class="field-label">Attendees</label><input id="clone-attendees" type="number" min="1" class="input-dark w-full font-mono" value="350"></div>
+      </div>
+      <div class="flex justify-end"><button id="clone-submit" class="btn-primary"><span class="spinner hidden"></span><i data-lucide="copy-plus" class="h-4 w-4"></i> Clone Event</button></div>
+      <div id="clone-result"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Settings, Tokenomics & Guardrails admin console ===== -->
+<div id="modal-admin" class="fixed inset-0 z-40 hidden" role="dialog" aria-modal="true" aria-labelledby="admin-title">
+  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" data-admin-close></div>
+  <div class="absolute inset-y-0 right-0 w-[min(1120px,97vw)] bg-[#0F1626] border-l border-line flex flex-col shadow-2xl">
+    <div class="flex items-center justify-between px-6 pt-5 pb-3">
+      <div>
+        <h2 id="admin-title" class="text-lg font-semibold text-white flex items-center gap-2"><i data-lucide="settings-2" class="h-5 w-5 text-accent"></i> Settings, Tokenomics &amp; Guardrails</h2>
+        <p class="text-sm text-slate-400">Every number here is read live from SQLite: real token meters, real incidents, real benchmark runs.</p>
+      </div>
+      <button class="rounded-lg p-2 text-slate-400 hover:bg-panel2 focus-ring" data-admin-close aria-label="Close settings"><i data-lucide="x" class="h-5 w-5"></i></button>
+    </div>
+    <div class="px-6 flex gap-1 border-b border-line overflow-x-auto" role="tablist">
+      <button class="modal-tab active whitespace-nowrap" data-admin-tab="usage" role="tab">💰 Usage, Tokenomics &amp; Scaling <span class="font-mono text-[10px] text-slate-500">LEC 11</span></button>
+      <button class="modal-tab whitespace-nowrap" data-admin-tab="security" role="tab">🛡️ Security Guardrails &amp; Red-Team Audit <span class="font-mono text-[10px] text-slate-500">LEC 12</span></button>
+      <button class="modal-tab whitespace-nowrap" data-admin-tab="system" role="tab">🔌 Venue Blueprints, Models &amp; Evidence Export</button>
+    </div>
+    <div id="admin-body" class="flex-1 overflow-y-auto p-6 space-y-5"></div>
+  </div>
+</div>
+
+<div id="last-run-pill" role="button" tabindex="0" title="Open usage &amp; tokenomics" class="hidden cursor-pointer hover:border-accent fixed bottom-4 left-[19.5rem] z-30 rounded-full border border-line bg-panel2/95 backdrop-blur px-4 py-1.5 font-mono text-[11px] text-slate-300 shadow-lg"></div>
+<div id="toast-root" class="fixed bottom-5 right-5 z-50 space-y-2" aria-live="polite"></div>
+<script src="/static/warroom.js"></script>
+<script src="/static/admin.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

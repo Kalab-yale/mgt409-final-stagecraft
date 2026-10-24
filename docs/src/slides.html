@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stagecraft AI · MGT 409 final project</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
+<style>
+  :root { --r-main-font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Inter, Roboto, Arial, sans-serif;
+          --r-heading-font: var(--r-main-font); --r-main-color: #1d1d1f; --r-heading-color: #1d1d1f; --r-link-color: #0071e3;
+          --r-heading-text-transform: none; --r-heading-font-weight: 700; --r-main-font-size: 34px; --r-heading-letter-spacing: -0.02em; }
+  .reveal .slides section { text-align: left; }
+  .reveal h1 { font-size: 2.3em; } .reveal h2 { font-size: 1.45em; margin-bottom: .5em; }
+  .reveal p, .reveal li { line-height: 1.35; }
+  .reveal ul { margin-left: 1em; }
+  .muted { color: #6e6e73; } .accent { color: #0071e3; } .green { color: #1f7a35; } .red { color: #c4141b; }
+  .kicker { font-size: .55em; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #0071e3; margin-bottom: .4em; }
+  .brand { display: inline-flex; align-items: center; gap: 14px; font-weight: 600; font-size: .7em; color: #6e6e73; }
+  .brand i { width: 46px; height: 46px; border-radius: 12px; background: #1d1d1f; color: #fff; display: inline-grid; place-items: center; font-style: normal; font-size: 24px; }
+  .shot { border: 1px solid #e5e5ea; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.08); width: 100%; display: block; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
+  .cols.wide { grid-template-columns: 1.25fr 1fr; }
+  .big { font-size: 2.4em; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+  .stat { border: 1px solid #e5e5ea; border-radius: 16px; padding: 18px 22px; }
+  .stat .l { font-size: .6em; color: #6e6e73; margin-top: 6px; line-height: 1.3; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .stats.four { grid-template-columns: repeat(4, 1fr); }
+  table.t { font-size: .68em; border-collapse: collapse; width: 100%; }
+  table.t th { color: #6e6e73; font-weight: 600; text-align: left; border-bottom: 2px solid #d2d2d7; padding: 8px 10px; }
+  table.t td { border-bottom: 1px solid #e5e5ea; padding: 8px 10px; }
+  table.t td.r, table.t th.r { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; font-size: .5em; font-weight: 600; padding: 4px 12px; border-radius: 99px; background: #e8f1fc; color: #0071e3; vertical-align: middle; }
+  .small { font-size: .66em; } .tiny { font-size: .5em; color: #86868b; }
+  .layer { border-radius: 14px; padding: 12px 18px; background: #f5f5f7; margin-bottom: 12px; font-size: .66em; }
+  .layer b { display: block; font-size: 1.1em; }
+  .reveal .slide-number { font-size: 14px; background: transparent; color: #86868b; }
+  .reveal .progress { color: #0071e3; }
+</style>
+</head>
+<body>
+<div class="reveal"><div class="slides">
+
+<!-- 1. Title -->
+<section>
+  <div class="cols wide" style="align-items:center">
+    <div>
+      <div class="brand"><i>S</i> Stagecraft AI</div>
+      <h1 style="margin-top:.4em">The planner that keeps your summit on track</h1>
+      <p class="muted" style="font-size:.8em">AI agents read your inbox, flag what's slipping, and re-plan the day in 30 seconds. You approve every change.</p>
+      <p style="font-size:.6em;margin-top:1.4em"><b>Kalab Dagem</b> · MGT 409 AI Foundations for Managers · Fall 2026<br><span class="muted">{{REPO_URL}}</span></p>
+    </div>
+    <img class="shot" src="screenshots/01-home.jpg" alt="Your events">
+  </div>
+</section>
+
+<!-- 2. Problem -->
+<section>
+  <div class="kicker">The problem</div>
+  <h2>A 350-person summit, run by volunteers, out of Gmail and a spreadsheet</h2>
+  <div class="stats" style="margin-top:.8em">
+    <div class="stat"><div class="big">15+</div><div class="l">deadlines, 8 vendor and sponsor contracts, dietary counts for 362 people, speakers from 3 cities</div></div>
+    <div class="stat"><div class="big">14</div><div class="l">emails in one inbox that change the plan or need a reply, plus one fake invoice carrying a hidden AI instruction</div></div>
+    <div class="stat"><div class="big">~45 min</div><div class="l">to re-plan one day-of problem by hand: a free room that fits, AV, conflicts, messages (estimate)</div></div>
+  </div>
+  <p class="small muted" style="margin-top:1.2em">Example: the student team behind the Yale Black Venture Summit. One or two big events a year, organized by people with full-time jobs or classes. When something slips, it costs fees, penalties, and goodwill.</p>
+</section>
+
+<!-- 3. What's new -->
+<section>
+  <div class="kicker">What's new</div>
+  <h2>Not another event suite, and not a chatbot</h2>
+  <table class="t">
+    <tr><th>Today</th><th>The gap</th></tr>
+    <tr><td><b>Cvent, Bizzabo</b> (enterprise suites, adding AI copilots)</td><td>Built and priced for event companies (Bizzabo reported at ~$18k/yr); don't read your inbox</td></tr>
+    <tr><td><b>Asana, Sheets, Notion</b></td><td>Don't know room capacity, catering cutoffs, or locked keynotes</td></tr>
+    <tr><td><b>ChatGPT</b></td><td>Holds no event state, can invent a room, follows instructions hidden in a pasted email</td></tr>
+  </table>
+  <ul class="small" style="margin-top:.8em">
+    <li><b>Your inbox becomes plan changes</b>: facts, red flags, drafted edits, replies</li>
+    <li><b>Verified day-of fixes</b>: AI proposes, code guarantees capacity, no double-booking, and the keynote stays put</li>
+    <li><b>You stay in charge</b>: agents only draft; nothing saves or sends without your click</li>
+    <li><b>About $0.50 per event per month</b> in AI (estimate)</li>
+  </ul>
+</section>
+
+<!-- 4. Agents -->
+<section>
+  <div class="kicker">How the agents work</div>
+  <h2 style="margin-bottom:.3em">13 agents, 3 safety layers, 1 human approval</h2>
+  <svg viewBox="0 0 720 300" width="100%" style="max-height:470px" role="img" aria-label="Agent architecture" font-family="-apple-system, Segoe UI, Arial, sans-serif">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#86868b"/></marker></defs>
+    <style>.b{fill:#fff;stroke:#d2d2d7;stroke-width:1.2}.ai{fill:#e8f1fc;stroke:#9cc6f5}.code{fill:#f5f5f7;stroke:#d2d2d7}.hu{fill:#eaf6ec;stroke:#a8d5b3}.t{font-size:12px;font-weight:600;fill:#1d1d1f}.s{font-size:10px;fill:#6e6e73}.l{stroke:#86868b;stroke-width:1.3;fill:none;marker-end:url(#a)}.lab{font-size:9.5px;fill:#0071e3}</style>
+    <rect x="8" y="22" width="112" height="44" rx="9" class="b"/><text x="64" y="41" text-anchor="middle" class="t">Email / Gmail</text><text x="64" y="56" text-anchor="middle" class="s">or pasted text</text>
+    <rect x="8" y="196" width="112" height="44" rx="9" class="b"/><text x="64" y="215" text-anchor="middle" class="t">Day-of issue</text><text x="64" y="230" text-anchor="middle" class="s">typed by organizer</text>
+    <rect x="150" y="100" width="98" height="64" rx="9" class="code"/><text x="199" y="124" text-anchor="middle" class="t">Layer 1</text><text x="199" y="139" text-anchor="middle" class="s">injection</text><text x="199" y="152" text-anchor="middle" class="s">firewall (code)</text>
+    <path d="M120,44 C140,44 140,110 150,118" class="l"/><path d="M120,218 C140,218 140,150 150,146" class="l"/>
+    <text x="199" y="186" text-anchor="middle" class="s">blocked: $0, logged</text>
+    <rect x="282" y="12" width="150" height="38" rx="9" class="ai"/><text x="357" y="35" text-anchor="middle" class="t">Inbox Watcher</text>
+    <rect x="282" y="58" width="150" height="38" rx="9" class="ai"/><text x="357" y="81" text-anchor="middle" class="t">Brief Writer</text>
+    <rect x="282" y="104" width="150" height="38" rx="9" class="ai"/><text x="357" y="121" text-anchor="middle" class="t">7 tab assistants</text><text x="357" y="134" text-anchor="middle" class="s">one per tab</text>
+    <path d="M248,118 C265,118 265,31 282,31" class="l"/><path d="M248,124 L282,123" class="l"/>
+    <rect x="282" y="196" width="100" height="44" rx="9" class="ai"/><text x="332" y="215" text-anchor="middle" class="t">Triage</text><text x="332" y="230" text-anchor="middle" class="s">what's affected</text>
+    <rect x="412" y="196" width="100" height="44" rx="9" class="ai"/><text x="462" y="215" text-anchor="middle" class="t">Solver</text><text x="462" y="230" text-anchor="middle" class="s">2 fixes</text>
+    <rect x="542" y="196" width="100" height="44" rx="9" class="ai"/><text x="592" y="215" text-anchor="middle" class="t">Comms</text><text x="592" y="230" text-anchor="middle" class="s">messages</text>
+    <path d="M248,146 C265,146 265,218 282,218" class="l"/><path d="M382,218 L412,218" class="l"/><path d="M512,218 L542,218" class="l"/>
+    <text x="397" y="190" text-anchor="middle" class="lab">Disruption-</text><text x="397" y="252" text-anchor="middle" class="lab">Assessment</text>
+    <text x="527" y="190" text-anchor="middle" class="lab">Resolution-</text><text x="527" y="252" text-anchor="middle" class="lab">Plan ×2</text>
+    <rect x="412" y="262" width="100" height="30" rx="8" class="code"/><text x="462" y="281" text-anchor="middle" class="s">Layer 2 rule checker</text><path d="M462,240 L462,262" class="l"/>
+    <rect x="470" y="58" width="104" height="46" rx="9" class="b"/><text x="522" y="78" text-anchor="middle" class="t">Drafted changes</text><text x="522" y="93" text-anchor="middle" class="s">flags · replies</text>
+    <path d="M432,31 C452,31 452,70 470,74" class="l"/><path d="M432,123 C452,123 452,92 470,88" class="l"/>
+    <rect x="606" y="58" width="106" height="46" rx="9" class="hu"/><text x="659" y="78" text-anchor="middle" class="t">Organizer</text><text x="659" y="93" text-anchor="middle" class="s">Confirm / Approve</text>
+    <path d="M574,81 L606,81" class="l"/><path d="M642,196 C660,170 660,130 659,104" class="l"/>
+    <rect x="606" y="124" width="106" height="40" rx="9" class="code"/><text x="659" y="141" text-anchor="middle" class="t">Event database</text><text x="659" y="155" text-anchor="middle" class="s">+ activity log</text>
+    <text x="560" y="290" class="s">Layer 3: token, $, step limits on every run</text>
+  </svg>
+  <p class="tiny">gpt-6-luna for every agent (course key). Typed outputs between agents; the hard parts (room search, constraint checks) are code.</p>
+</section>
+
+<!-- 5. Demo screenshots -->
+<section>
+  <div class="kicker">Demo</div>
+  <h2>Inbox in, plan changes out</h2>
+  <div class="cols">
+    <div><img class="shot" src="screenshots/02-inbox.jpg" alt="Inbox Watcher"><p class="tiny" style="margin-top:.6em">14 emails in one click, $0.0073: 9 need a reply, 14 red flags, 7 drafted changes, 1 phishing email quarantined</p></div>
+    <div><img class="shot" src="screenshots/06-assistant.jpg" alt="Assistant drafting a change"><p class="tiny" style="margin-top:.6em">Every tab has an assistant. Edits come back as cards: Confirm or Discard</p></div>
+  </div>
+</section>
+
+<!-- 6. A real run -->
+<section>
+  <div class="kicker">Demo · a real run</div>
+  <h2>"Room 2400's projector just died…"</h2>
+  <div class="cols wide">
+    <img class="shot" src="screenshots/09-resolve-options.jpg" alt="Two verified options">
+    <div class="small">
+      <p><b>A</b> Safety check: clean <span class="muted">· 0 tokens</span></p>
+      <p><b>B</b> Triage: 1 session, 118 people, room AV-degraded <span class="muted">· 5.7 s</span></p>
+      <p><b>C</b> Solver: Zhang Auditorium, same slot; both options verified by code <span class="muted">· 9.9 s</span></p>
+      <p><b>D</b> Comms: 4 messages, 4 volunteer tasks <span class="muted">· 11.6 s</span></p>
+      <p style="margin-top:.8em"><span class="big accent" style="font-size:1.6em">27 s · $0.0026</span><br><span class="muted">vs ~45 min by hand (estimate)</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- 7. Cost -->
+<section>
+  <div class="kicker">Cost to run</div>
+  <h2>About $0.50 per event per month</h2>
+  <div class="cols">
+    <table class="t">
+      <tr><th>Per use (measured)</th><th class="r">Cost</th></tr>
+      <tr><td>Read one email</td><td class="r">$0.00056</td></tr>
+      <tr><td>Ask an assistant</td><td class="r">$0.00028</td></tr>
+      <tr><td>Resolve an issue (3 agents, ~27k tokens)</td><td class="r">$0.0026</td></tr>
+      <tr><td><b>100 organizers / month</b> (estimate)</td><td class="r"><b>$50</b></td></tr>
+      <tr><td><b>10,000 organizers / month</b> (estimate)</td><td class="r"><b>$5,000</b></td></tr>
+    </table>
+    <div>
+      <p class="small" style="margin:0 0 .4em"><b>Did cutting cost hurt quality?</b> Same issue, both ways:</p>
+      <div class="stats" style="grid-template-columns:1fr 1fr">
+        <div class="stat"><div class="big" style="font-size:1.6em">56,384</div><div class="l">tokens, full context · $0.0031</div></div>
+        <div class="stat" style="background:#eaf6ec;border-color:#b7dfc0"><div class="big green" style="font-size:1.6em">24,028</div><div class="l">tokens, Cost-Saver · $0.0023</div></div>
+      </div>
+      <p class="small" style="margin-top:.6em"><b>57% fewer tokens, same verified fix.</b><br><span class="muted">Only 26.5% cheaper: output costs 5× input and didn't shrink. The next saving is shorter messages.</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- 8. Safety -->
+<section>
+  <div class="kicker">Safety</div>
+  <h2>Three layers, each proven by a test</h2>
+  <div class="cols wide">
+    <img class="shot" src="screenshots/13-blocked.jpg" alt="Injection blocked">
+    <div>
+      <div class="layer"><b>1 · Injection firewall</b>Hidden instructions blocked before any AI reads them: 0 tokens</div>
+      <div class="layer"><b>2 · Action lock</b>Code rejects made-up rooms, overfull rooms, double-booking, keynote moves</div>
+      <div class="layer"><b>3 · Spending limit</b>60k tokens, $0.15, 4 steps per run; stops loops</div>
+      <p class="small green"><b>Attack test: 3 of 3 stopped.</b> <span class="muted">39 incidents logged</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- 9. Impact -->
+<section>
+  <div class="kicker">Impact</div>
+  <h2>Minutes to seconds, for cents</h2>
+  <div class="stats four">
+    <div class="stat"><div class="big">26 s</div><div class="l">median to re-plan and draft all messages (17 runs) vs ~45 min by hand (estimate)</div></div>
+    <div class="stat"><div class="big">17 / 17</div><div class="l">fixes passed the rule checker; 0 invalid schedules shown to the organizer</div></div>
+    <div class="stat"><div class="big">~18 h</div><div class="l">volunteer time saved per event at 25 issues a month (estimate)</div></div>
+    <div class="stat"><div class="big">$30</div><div class="l">a year in AI for a school running 20 conferences (estimate)</div></div>
+  </div>
+  <p class="small muted" style="margin-top:1em">Measured from the app's logs; baselines are estimates until the user trial with a real organizer.</p>
+</section>
+
+<!-- 10. Next -->
+<section>
+  <div class="kicker">What's next</div>
+  <h2>From demo to the next YBVS</h2>
+  <ul>
+    <li><b>Pilot</b> with a real organizing team: hours saved, share of drafts accepted</li>
+    <li><b>Team accounts</b> with approval rights</li>
+    <li><b>Automatic Gmail / Outlook</b> watching and a morning email brief</li>
+    <li><b>"Send after I click"</b> for replies and speaker messages</li>
+    <li><b>Shorter Comms output</b>, the biggest remaining cost</li>
+  </ul>
+  <p class="small muted" style="margin-top:1.2em">Thank you · {{REPO_URL}}</p>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>Reveal.initialize({ hash: true, slideNumber: "c/t", controls: true, progress: true, width: 1280, height: 760, margin: 0.06, transition: "fade" });</script>
+</body>
+</html>

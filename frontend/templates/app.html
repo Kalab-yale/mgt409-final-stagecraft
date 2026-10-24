@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stagecraft · Event planner</title>
+  <link rel="stylesheet" href="/static/ui/app.css?v={{ app_version }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/" aria-label="Stagecraft home"><span class="brand-mark">S</span> Stagecraft</a>
+    <nav class="crumb" id="crumb" aria-label="Breadcrumb"></nav>
+    <div class="spacer"></div>
+    <span class="muted small" id="today"></span>
+    <a class="btn sm" href="#/settings" data-settings-link title="AI cost, the cost-vs-quality proof, guardrails, and connections"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg> AI usage and safety</a>
+  </header>
+  <main id="app" aria-live="polite"></main>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script type="module" src="/static/ui/main.js?v={{ app_version }}"></script>
+</body>
+</html>
