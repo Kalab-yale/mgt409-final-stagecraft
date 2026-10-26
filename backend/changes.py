@@ -19,7 +19,8 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from backend import database as db
-from backend import security
+from backend import notify, security
+from backend import team as team_mod
 from backend.config import demo_today
 
 RECORD_TYPES: dict[str, tuple[str, str]] = {  # record_type -> (table, id prefix)
@@ -30,6 +31,7 @@ RECORD_TYPES: dict[str, tuple[str, str]] = {  # record_type -> (table, id prefix
     "vendor": ("vendors", "vnd"),
     "budget_item": ("budget_items", "bud"),
     "flag": ("flags", "flg"),
+    "member": ("team_members", "mem"),
 }
 MAX_BULK_ROWS = 200
 
@@ -51,6 +53,22 @@ def _label(record: BaseModel) -> str:
         if getattr(record, attr, None):
             return str(getattr(record, attr))
     return getattr(record, "id", "record")
+
+
+def _disp(event_id: str, field: str, v: Any) -> Any:
+    """What a change card shows for a field (assignee ids become names)."""
+    return team_mod.names_for(event_id, v) if field == "assignees" else _show(v)
+
+
+def _with_team(event_id: str, table: str, fields: dict) -> dict:
+    if table not in ("tasks", "team_members"):
+        return fields
+    try:
+        if table == "team_members":
+            return team_mod.validate_member_fields(fields)
+        return team_mod.normalize_task_fields(event_id, fields)
+    except team_mod.TeamError as exc:
+        raise ChangeError(str(exc)) from exc
 
 
 def _show(v: Any) -> Any:
@@ -182,17 +200,20 @@ def draft_update(event_id: str, tab: str, record_type: str, record_id: str, chan
         raise ChangeError(f"Unknown field(s) {sorted(unknown)}. Valid fields: {', '.join(f for f in model.model_fields if f not in ('id', 'event_id'))}.")
     if {"id", "event_id"} & set(changes):
         raise ChangeError("id and event_id can't be changed.")
+    changes = _with_team(event_id, table, changes)
     try:
         updated = model.model_validate(current.model_dump() | changes)
     except ValidationError as exc:
         raise ChangeError(f"Invalid value: {_pydantic_msg(exc)}") from exc
     before, after = current.model_dump(mode="json"), updated.model_dump(mode="json")
-    diff = [{"field": k, "before": _show(before[k]), "after": _show(after[k])} for k in changes if before[k] != after[k]]
+    changed = [k for k in changes if before[k] != after[k]]
+    shown = [k for k in changed if not (k == "owner" and "assignees" in changed)]  # owner text follows assignees
+    diff = [{"field": k, "before": _disp(event_id, k, before[k]), "after": _disp(event_id, k, after[k])} for k in shown]
     if not diff:
         raise ChangeError("No change: those values are already set.")
     summary = f"Update {record_type.replace('_', ' ')} '{_label(current)}': " + ", ".join(f"{d['field']} {d['before']} → {d['after']}" for d in diff)
     return _store(event_id, tab, "update_record", {"table": table, "record_id": record_id,
-                                                   "changes": {d["field"]: after[d["field"]] for d in diff}}, summary, diff, reason)
+                                                   "changes": {k: after[k] for k in changed}}, summary, diff, reason)
 
 
 def draft_create(event_id: str, tab: str, record_type: str, fields: dict, reason: str = "", dimension: str | None = None) -> dict:
@@ -209,6 +230,7 @@ def draft_bulk_create(event_id: str, tab: str, record_type: str, rows: list[dict
     for i, row in enumerate(rows, 1):
         fields = _prepare_fields(table, dict(row), event_id, dimension)
         try:
+            fields = _with_team(event_id, table, fields)
             model.model_validate({"id": "draft"} | fields)
             prepared.append(fields)
         except ValidationError as exc:
@@ -219,7 +241,7 @@ def draft_bulk_create(event_id: str, tab: str, record_type: str, rows: list[dict
     noun = record_type.replace("_", " ")
     summary = (f"Add {noun} '{names[0]}'" if len(prepared) == 1
                else f"Add {len(prepared)} {noun}s: {', '.join(names[:5])}{' and more' if len(names) > 5 else ''}")
-    diff = [{"field": k, "before": None, "after": _show(v)} for k, v in prepared[0].items() if k != "event_id"] if len(prepared) == 1 \
+    diff = [{"field": k, "before": None, "after": _disp(event_id, k, v)} for k, v in prepared[0].items() if k != "event_id"] if len(prepared) == 1 \
         else [{"field": "rows", "before": None, "after": len(prepared)}]
     return _store(event_id, tab, "create_records", {"table": table, "rows": prepared}, summary, diff, reason)
 
@@ -296,7 +318,15 @@ def draft_catering_update(event_id: str, tab: str, sla_id: str, changes: dict, r
 # ---- Confirm / reject ----------------------------------------------------------------------------------
 
 
-def _apply(change: dict) -> None:
+def touches_budget(change: dict) -> bool:
+    """Money changes (budget lines, vendor contract values) need a lead's OK."""
+    p = change.get("payload") or {}
+    if p.get("table") == "budget_items":
+        return True
+    return p.get("table") == "vendors" and any(d.get("field") == "contract_value_usd" for d in change.get("diff") or [])
+
+
+def _apply(change: dict, actor: str = "", actor_user_id: str | None = None) -> None:
     p, eid = change["payload"], change["event_id"]
     kind = change["kind"]
     if kind == "update_record":
@@ -304,16 +334,30 @@ def _apply(change: dict) -> None:
         if current is None:
             raise ChangeError("The record no longer exists.")
         now = current.model_dump(mode="json")
-        stale = [d["field"] for d in change["diff"] if _show(now.get(d["field"])) != d["before"]]
+        stale = [d["field"] for d in change["diff"] if _disp(eid, d["field"], now.get(d["field"])) != d["before"]]
         if stale:
             raise ChangeError(f"Someone changed {', '.join(stale)} after this was drafted. Ask the assistant again.")
-        db.update_record(p["table"], p["record_id"], **p["changes"])
+        updated = db.update_record(p["table"], p["record_id"], **p["changes"])
+        if p["table"] == "team_members":
+            team_mod.after_member_saved(eid, p["record_id"])
+        if p["table"] == "tasks" and "assignees" in p["changes"]:
+            notify.assignment_changed(eid, updated, current.assignees, updated.assignees, actor_user_id, actor)
     elif kind == "create_records":
         prefix = next(pre for t, pre in RECORD_TYPES.values() if t == p["table"])
         models = [db.TABLES[p["table"]].model_validate({"id": _new_id(prefix)} | row) for row in p["rows"]]
         db.insert_records(p["table"], models)
+        if p["table"] == "team_members":
+            for m in models:
+                team_mod.after_member_saved(eid, m.id)
+        for m in models:
+            if p["table"] == "tasks" and m.assignees:
+                notify.assignment_changed(eid, m, [], m.assignees, actor_user_id, actor)
+            elif p["table"] == "flags":
+                notify.flag_raised(eid, m)
     elif kind == "delete_record":
-        if not db.delete_record(p["table"], p["record_id"]):
+        if p["table"] == "team_members" and db.get_record("team_members", p["record_id"]):
+            team_mod.remove_member(eid, p["record_id"])
+        elif not db.delete_record(p["table"], p["record_id"]):
             raise ChangeError("The record no longer exists.")
     elif kind == "session_move":
         s = db.get_session(p["session_id"])
@@ -334,14 +378,16 @@ def _apply(change: dict) -> None:
         raise ChangeError(f"Unknown change kind '{kind}'.")
 
 
-def confirm_change(change_id: str, actor: str = "organizer") -> dict:
+def confirm_change(change_id: str, actor: str = "organizer", actor_user_id: str | None = None, can_approve_budget: bool = True) -> dict:
     change = get_change(change_id)
     if change is None:
         raise KeyError(f"Unknown change '{change_id}'.")
     if change["status"] != "Pending":
         raise ChangeError(f"This change is already {change['status'].lower()}.")
+    if touches_budget(change) and not can_approve_budget:
+        raise ChangeError("Only the PMO or an event lead can approve budget changes. It stays waiting for a lead's OK.")
     try:
-        _apply(change)
+        _apply(change, actor, actor_user_id)
     except (ChangeError, ValidationError, ValueError, KeyError) as exc:
         msg = _pydantic_msg(exc) if isinstance(exc, ValidationError) else str(exc)
         _set_status(change_id, "Failed", msg)

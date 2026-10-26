@@ -19,12 +19,12 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-from backend import changes, planning, security, tokenomics, tools
+from backend import changes, planning, security, team, tokenomics, tools
 from backend import database as db
 from backend.agents.common import BudgetExceeded, guarded_run
 from backend.config import demo_today, get_agent_settings, get_pydantic_ai_model
 
-RecordType = Literal["deadline", "task", "initiative", "attendee", "vendor", "budget_item", "flag"]
+RecordType = Literal["deadline", "task", "initiative", "attendee", "vendor", "budget_item", "flag"]  # team members: Team-tab tools below
 HISTORY_TURNS = 8  # earlier messages replayed as plain text (cheaper than full tool transcripts)
 
 
@@ -79,13 +79,21 @@ def list_deadlines(ctx: RunContext[AssistantDeps], dimension: str = "", status: 
 def list_tasks(ctx: RunContext[AssistantDeps], dimension: str = "", status: str = "", owner: str = "", query: str = "") -> list[dict]:
     """Tasks (To Do, In Progress, Done, Blocked) with owner, due date, and workstream. Optional filters incl. a title keyword."""
     inits = {i.id: i.title for i in db.list_records("initiatives", ctx.deps.event_id)}
-    rows = [{"id": t.id, "title": t.title, "status": t.status, "priority": t.priority, "owner": t.owner,
+    rows = [{"id": t.id, "title": t.title, "status": t.status, "priority": t.priority, "owner": t.owner, "assignee_ids": t.assignees,
              "due_date": t.due_date.isoformat() if t.due_date else None, "workstream": inits.get(t.initiative_id), "dimension": t.dimension}
             for t in db.list_records("tasks", ctx.deps.event_id)
             if (not dimension or t.dimension == dimension) and (not status or t.status == status)
             and (not owner or owner.lower() in t.owner.lower()) and (not query or query.lower() in t.title.lower())]
     _log(ctx, f"list_tasks({dimension or 'all'}) -> {len(rows)}")
     return rows
+
+
+def list_team(ctx: RunContext[AssistantDeps]) -> dict:
+    """The organizing team: each member's id, name, role, team, email, whether they are the PMO, and their workload
+    (open, overdue, blocked, shared tasks; deadlines owned; workstreams led). Use member names or ids in task `assignees`."""
+    w = team.workload(ctx.deps.event_id)
+    _log(ctx, f"list_team -> {len(w['members'])} members, PMO {w['pmo_name'] or 'none'}")
+    return w
 
 
 def list_initiatives(ctx: RunContext[AssistantDeps], dimension: str = "") -> list[dict]:
@@ -294,6 +302,22 @@ def propose_delete(ctx: RunContext[AssistantDeps], record_type: RecordType, reco
     return _guard(ctx, record_type) or _try(ctx, changes.draft_delete, record_type, record_id, reason)
 
 
+# Team-tab only. Team members are the organizing team (people who own tasks), not speakers or attendees.
+def propose_add_member(ctx: RunContext[AssistantDeps], fields: dict[str, Any], reason: str) -> dict:
+    """Draft adding someone to the organizing team (name, email, role, team, is_pmo). Not saved until confirmed."""
+    return _try(ctx, changes.draft_create, "member", fields, reason)
+
+
+def propose_update_member(ctx: RunContext[AssistantDeps], member_id: str, changes_to_make: dict[str, Any], reason: str) -> dict:
+    """Draft editing a team member (e.g. {"role": "Volunteer lead"} or {"is_pmo": true}). Not saved until confirmed."""
+    return _try(ctx, changes.draft_update, "member", member_id, changes_to_make, reason)
+
+
+def propose_remove_member(ctx: RunContext[AssistantDeps], member_id: str, reason: str) -> dict:
+    """Draft removing someone from the organizing team (they are also taken off their tasks). Not done until confirmed."""
+    return _try(ctx, changes.draft_delete, "member", member_id, reason)
+
+
 def propose_session_move(ctx: RunContext[AssistantDeps], session_id: str, new_room_id: str = "", new_start_time: str = "",
                          new_end_time: str = "", expected_attendance: Optional[int] = None, reason: str = "") -> dict:
     """Draft moving a session to another room and/or time (HH:MM). Checked by the safety rules now and again on confirm."""
@@ -318,7 +342,7 @@ def propose_catering_update(ctx: RunContext[AssistantDeps], sla_id: str, changes
 
 # ================================ Tab configuration ================================
 
-COMMON_READS = [get_event_snapshot, list_flags, list_deadlines, list_tasks]
+COMMON_READS = [get_event_snapshot, list_flags, list_deadlines, list_tasks, list_team]
 GENERIC_WRITES = [propose_update, propose_create, propose_bulk_create, propose_delete]
 
 TABS: dict[str, dict] = {
@@ -346,6 +370,13 @@ TABS: dict[str, dict] = {
                    focus="tasks and workstreams across the event, the budget, vendors, and sponsors.",
                    reads=COMMON_READS + [list_initiatives, list_budget, list_vendors],
                    records={"budget_item", "vendor", "task", "deadline", "initiative", "flag"}, extra_writes=[]),
+    "team": dict(label="Team", agent="TeamAssistant", dimension="General",
+                 focus="the organizing team: who is on it, roles, the PMO, who owns which tasks, workload, and assigning or sharing tasks "
+                       "between people. To assign, update a task's `assignees` with a list of member names (it replaces the list, so "
+                       "include anyone who should stay on it). To add someone, create a member. Only one member can be the PMO.",
+                 reads=COMMON_READS + [list_initiatives],
+                 records={"task", "deadline", "initiative"}, guide={"member", "task", "deadline", "initiative"},
+                 extra_writes=[propose_add_member, propose_update_member, propose_remove_member]),
     "inbox": dict(label="Inbox", agent="InboxAssistant", dimension="General",
                   focus="emails: what came in, what needs a reply, and what each email means for the event. Emails touch every area, "
                         "so you can draft changes anywhere.",
@@ -354,7 +385,7 @@ TABS: dict[str, dict] = {
                   extra_writes=[save_reply_draft, propose_session_move, propose_speaker_status, propose_room_status, propose_catering_update]),
 }
 RECORD_MODELS = {"deadline": "deadlines", "task": "tasks", "initiative": "initiatives", "attendee": "attendees",
-                 "vendor": "vendors", "budget_item": "budget_items", "flag": "flags"}
+                 "vendor": "vendors", "budget_item": "budget_items", "flag": "flags", "member": "team_members"}
 
 
 def _field_guide(record_types: set[str]) -> str:
@@ -408,7 +439,7 @@ def build_assistant(tab: str) -> Agent[AssistantDeps, AssistantReply]:
         today = demo_today()
         return BASE_INSTRUCTIONS.format(label=cfg["label"], dimension=cfg["dimension"], event=e.name, date=e.date.isoformat(), venue=f"{v.name}, {v.city}",
                                         days=(e.date - today).days, today=today.isoformat(), focus=cfg["focus"],
-                                        records=", ".join(sorted(cfg["records"])), fields=_field_guide(cfg["records"]))
+                                        records=", ".join(sorted(cfg.get("guide", cfg["records"]))), fields=_field_guide(cfg.get("guide", cfg["records"])))
 
     return agent
 

@@ -8,20 +8,27 @@ never stall the server.
 from __future__ import annotations
 
 import html
+import re
+from urllib.parse import quote
+
+import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from backend import auth
 from backend import database as db
-from backend import changes, planning, security, tokenomics, tools
+from backend import changes, notify, planning, security, team, tokenomics, tools
 from backend.agents.assistants import TABS as ASSISTANT_TABS
 from backend.agents.assistants import run_assistant_turn
+from backend.agents import team_writers
 from backend.agents.brief_writer import get_or_create_brief
 from backend.agents.inbox_watcher import add_pasted_email, process_email, process_inbox
 from backend.agents.onboarding_agent import (
@@ -34,6 +41,7 @@ from backend.benchmark import list_benchmarks, run_cost_quality_benchmark
 from backend.evidence import SCALE_TIERS, build_evidence_bundle, system_status
 from backend.agents.onboarding_agent import geocode_city
 from backend.connectors import gmail
+from backend.connectors import google_gmail
 from backend.orchestrator import build_event_calendar, commit_resolution_plan, list_war_room_runs, run_crisis_war_room_pipeline
 
 
@@ -44,8 +52,42 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Stagecraft AI", version="0.13.0", lifespan=lifespan)
+# No public API docs (/docs, /redoc, /openapi.json): they would hand anyone a map of every endpoint.
+app = FastAPI(title="Stagecraft AI", version="0.16.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+PUBLIC_API = re.compile(r"^/api/(auth/(login|signup|logout|me)|events/[^/]+/calendar\.ics)$")  # everything else under /api needs a login
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    """Every /api call needs a valid session cookie, except logging in/out and the public attendee calendar.
+    Pages and static files load for everyone; the app shows the login screen when /api/auth/me says 401."""
+    path = request.url.path
+    if path.startswith("/api/") and not PUBLIC_API.match(path):
+        user = await run_in_threadpool(auth.user_for_token, request.cookies.get(auth.COOKIE))
+        if user is None:
+            return JSONResponse(status_code=401, content={"detail": "Please log in."})
+        request.state.user = user
+    return await call_next(request)
+
+
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+       "font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+CLASSIC_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"  # the first-build console loads CDN scripts inline
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Browser protections on every response: no framing (clickjacking), scripts only from this site, no MIME sniffing."""
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = CLASSIC_CSP if request.url.path == "/classic" else CSP
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 
 @app.middleware("http")
@@ -105,12 +147,195 @@ def _event_payload(event_id: str) -> dict:
     }
 
 
+# ---- Accounts ------------------------------------------------------------------------------------
+
+
+class SignupRequest(BaseModel):
+    first_name: str = Field(max_length=60)
+    last_name: str = Field(max_length=60)
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=128)
+    confirm_password: Optional[str] = Field(default=None, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=128)
+
+
+def _user_json(user: auth.User) -> dict:
+    return {"user": user.model_dump() | {"display_name": user.display_name}}
+
+
+def _client(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _set_session_cookie(request: Request, response: JSONResponse, user_id: str) -> None:
+    response.set_cookie(auth.COOKIE, auth.create_session(user_id, request.headers.get("user-agent", "")), max_age=auth.SESSION_DAYS * 86400,
+                        httponly=True, samesite="lax", secure=request.url.scheme == "https", path="/")
+
+
+def _session_response(request: Request, user: auth.User) -> JSONResponse:
+    response = JSONResponse(_user_json(user))
+    _set_session_cookie(request, response, user.id)
+    return response
+
+
+def _auth_error(exc: auth.AuthError, status: int = 400) -> JSONResponse:
+    return JSONResponse(status_code=429 if isinstance(exc, auth.RateLimited) else status, content={"error": str(exc)})
+
+
+@app.post("/api/auth/signup")
+def signup(request: Request, body: SignupRequest):
+    """Create an account and log it in. The password is hashed with scrypt; it is never stored or logged."""
+    try:
+        auth.check_rate(_client(request), "signup")
+        if body.confirm_password is not None and body.confirm_password != body.password:
+            raise auth.AuthError("The two passwords don't match.")
+        user = auth.create_user(body.first_name, body.last_name, body.email, body.password)
+    except auth.AuthError as exc:
+        return _auth_error(exc)
+    return _session_response(request, user)
+
+
+@app.post("/api/auth/login")
+def login(request: Request, body: LoginRequest):
+    try:
+        auth.check_rate(_client(request), "login")
+        user = auth.authenticate(body.email, body.password)
+    except auth.AuthError as exc:
+        return _auth_error(exc, 401 if "incorrect" in str(exc) else 429)
+    return _session_response(request, user)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request):
+    auth.end_session(request.cookies.get(auth.COOKIE))
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(auth.COOKIE, path="/")
+    return response
+
+
+@app.get("/api/auth/me")
+def me(request: Request):
+    user = auth.user_for_token(request.cookies.get(auth.COOKIE))
+    if user is None:
+        return JSONResponse(status_code=401, content={"detail": "Please log in."})
+    return _user_json(user)
+
+
+# ---- Account settings (all need a session; sensitive ones need the current password too) ----------
+
+
+class ProfileUpdate(BaseModel):
+    first_name: str = Field(max_length=60)
+    last_name: str = Field(max_length=60)
+
+
+class EmailChange(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=128)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(max_length=128)
+    new_password: str = Field(max_length=128)
+    confirm_password: Optional[str] = Field(default=None, max_length=128)
+
+
+class Preferences(BaseModel):
+    theme: Optional[str] = Field(default=None, max_length=10)
+    accent: Optional[str] = Field(default=None, max_length=10)
+
+
+class DeleteAccount(BaseModel):
+    password: str = Field(max_length=128)
+    confirm: str = Field(max_length=20)
+
+
+@app.post("/api/account/profile")
+def account_profile(request: Request, body: ProfileUpdate):
+    try:
+        return _user_json(auth.update_profile(request.state.user, body.first_name, body.last_name))
+    except auth.AuthError as exc:
+        return _auth_error(exc)
+
+
+@app.post("/api/account/email")
+def account_email(request: Request, body: EmailChange):
+    try:
+        auth.check_rate(_client(request), "sensitive")
+        return _user_json(auth.change_email(request.state.user, body.email, body.password))
+    except auth.AuthError as exc:
+        return _auth_error(exc)
+
+
+@app.post("/api/account/password")
+def account_password(request: Request, body: PasswordChange):
+    """New password; every other session is signed out, and this one gets a fresh token."""
+    try:
+        auth.check_rate(_client(request), "sensitive")
+        if body.confirm_password is not None and body.confirm_password != body.new_password:
+            raise auth.AuthError("The two new passwords don't match.")
+        ended = auth.change_password(request.state.user, body.current_password, body.new_password, keep_token=None)
+    except auth.AuthError as exc:
+        return _auth_error(exc)
+    response = JSONResponse({"ok": True, "other_sessions_ended": max(0, ended - 1)})
+    _set_session_cookie(request, response, request.state.user.id)  # all old tokens are gone; issue a new one for this browser
+    return response
+
+
+@app.get("/api/account/sessions")
+def account_sessions(request: Request):
+    return {"sessions": auth.list_sessions(request.state.user, request.cookies.get(auth.COOKIE))}
+
+
+@app.post("/api/account/sessions/revoke-others")
+def account_revoke_others(request: Request):
+    return {"ended": auth.end_other_sessions(request.state.user, request.cookies.get(auth.COOKIE))}
+
+
+@app.delete("/api/account/sessions/{session_id}")
+def account_revoke_one(request: Request, session_id: str):
+    if not auth.end_session_by_id(request.state.user, session_id):
+        raise HTTPException(status_code=404, detail="No such session.")
+    return {"ok": True}
+
+
+@app.post("/api/account/preferences")
+def account_preferences(request: Request, body: Preferences):
+    try:
+        return _user_json(auth.set_preferences(request.state.user, body.theme, body.accent))
+    except auth.AuthError as exc:
+        return _auth_error(exc)
+
+
+@app.post("/api/account/delete")
+def account_delete(request: Request, body: DeleteAccount):
+    try:
+        auth.check_rate(_client(request), "sensitive")
+        auth.delete_account(request.state.user, body.password, body.confirm)
+    except auth.AuthError as exc:
+        return _auth_error(exc)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(auth.COOKIE, path="/")
+    return response
+
+
 # ---- Pages ---------------------------------------------------------------------------------------
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    """The event-planner workspace (design A)."""
+    """The event-planner workspace (design A). Also where Google sends the browser back after "Connect Gmail"."""
+    if google_gmail.is_callback(request.query_params):
+        user = auth.user_for_token(request.cookies.get(auth.COOKIE))
+        try:
+            return_to, address = google_gmail.finish_connect(user, request.query_params)
+            return RedirectResponse(f"/?gmail=connected{return_to}", status_code=303)
+        except (google_gmail.GmailError, httpx.HTTPError) as exc:
+            return RedirectResponse(f"/?gmail_error={quote(str(exc)[:200])}#/", status_code=303)
     return templates.TemplateResponse(request, "app.html", {"app_version": app.version})
 
 
@@ -178,11 +403,12 @@ def home():
 
 
 @app.get("/api/events/{event_id}/planning")
-def event_planning(event_id: str):
-    """Deadlines, initiatives + tasks, attendees, budget, vendors, inbox, and red flags for one event."""
+def event_planning(request: Request, event_id: str):
+    """Deadlines, initiatives + tasks, attendees, budget, vendors, inbox, and red flags for one event, plus `me`:
+    which team member the signed-in person is here and whether they may approve budget changes."""
     if db.get_event(event_id) is None:
         raise HTTPException(status_code=404, detail=f"Unknown event '{event_id}'.")
-    return planning.get_planning_state(event_id)
+    return planning.get_planning_state(event_id) | {"me": notify.access_for(event_id, request.state.user)}
 
 
 @app.get("/api/events/{event_id}/weather")
@@ -197,11 +423,22 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=10, max_length=4000)
 
 
+def _creator_runs_it(request: Request, result: dict) -> dict:
+    """The person who creates an event becomes its PMO and a Lead, so they can assign work and approve budget changes."""
+    event_id = result.get("event_id")
+    if event_id and db.get_event(event_id):
+        m = team.add_creator(event_id, request.state.user)
+        if m:
+            changes.log_activity(event_id, _actor(request), "team", f"{m.name} created the event and is its PMO", m.id)
+            result["you"] = {"member_id": m.id, "is_pmo": True, "access": "Lead"}
+    return result
+
+
 @app.post("/api/events/generate-ai")
-def generate_event(body: GenerateRequest):
+def generate_event(request: Request, body: GenerateRequest):
     result = generate_event_from_prompt(body.prompt)
     if result.get("ok"):
-        return result
+        return _creator_runs_it(request, result)
     return JSONResponse(status_code=403 if result.get("blocked") else 422, content=result)
 
 
@@ -220,7 +457,7 @@ class ImportRequest(BaseModel):
 
 
 @app.post("/api/events/import-csv")
-def import_event(body: ImportRequest):
+def import_event(request: Request, body: ImportRequest):
     if body.custom_city:
         if not body.csv_text:
             raise HTTPException(status_code=400, detail="A custom city needs CSV rows (rooms are inferred from them).")
@@ -238,7 +475,7 @@ def import_event(body: ImportRequest):
                                                    csv_text=body.csv_text, template_event_id=body.template_event_id,
                                                    event_slug=body.event_slug, description=body.description)
     if result.get("ok"):
-        return result
+        return _creator_runs_it(request, result)
     return JSONResponse(status_code=403 if result.get("blocked") else 400, content=result)
 
 
@@ -291,26 +528,28 @@ def list_pending_changes(event_id: str, status: str = "Pending", tab: Optional[s
     return {"changes": changes.list_changes(event_id, tab, status or None)}
 
 
-def _decide(event_id: str, change_id: str, confirm: bool) -> dict:
+def _decide(request: Request, event_id: str, change_id: str, confirm: bool) -> dict:
     change = changes.get_change(change_id)
     if change is None or change["event_id"] != event_id:
         raise HTTPException(status_code=404, detail=f"Unknown change '{change_id}'.")
+    user, actor = request.state.user, _actor(request)
     try:
-        result = changes.confirm_change(change_id) if confirm else changes.reject_change(change_id)
+        result = (changes.confirm_change(change_id, actor, user.id, notify.access_for(event_id, user)["can_approve_budget"]) if confirm
+                  else changes.reject_change(change_id, actor))
     except changes.ChangeError as exc:
         return JSONResponse(status_code=409, content={"error": str(exc), "change": change})
     return {"change": result, "health": planning.event_health(event_id)}
 
 
 @app.post("/api/events/{event_id}/changes/{change_id}/confirm")
-def confirm_change(event_id: str, change_id: str):
+def confirm_change(request: Request, event_id: str, change_id: str):
     """Apply a drafted change after re-validating it against current data (stale edits are refused)."""
-    return _decide(event_id, change_id, confirm=True)
+    return _decide(request, event_id, change_id, confirm=True)
 
 
 @app.post("/api/events/{event_id}/changes/{change_id}/reject")
-def reject_change(event_id: str, change_id: str):
-    return _decide(event_id, change_id, confirm=False)
+def reject_change(request: Request, event_id: str, change_id: str):
+    return _decide(request, event_id, change_id, confirm=False)
 
 
 @app.get("/api/events/{event_id}/activity")
@@ -324,7 +563,7 @@ class RecordEdit(BaseModel):
 
 
 @app.post("/api/events/{event_id}/records/{record_type}/{record_id}")
-def edit_record(event_id: str, record_type: str, record_id: str, body: RecordEdit):
+def edit_record(request: Request, event_id: str, record_type: str, record_id: str, body: RecordEdit):
     """A person's own edit (e.g. ticking a task done). Applied right away, still validated and logged.
     Assistant edits go through drafts and Confirm instead."""
     _require_event(event_id)
@@ -334,14 +573,224 @@ def edit_record(event_id: str, record_type: str, record_id: str, body: RecordEdi
     record = db.get_record(table, record_id)
     if record is None or record.event_id != event_id:
         raise HTTPException(status_code=404, detail=f"Unknown {record_type} '{record_id}'.")
+    if table == "budget_items" and not notify.access_for(event_id, request.state.user)["can_approve_budget"]:
+        return JSONResponse(status_code=403, content={"error": "Only the PMO or an event lead can change the budget."})
     try:
-        updated = db.update_record(table, record_id, **body.changes)
+        fields = (team.normalize_task_fields(event_id, body.changes) if table == "tasks"
+                  else team.validate_member_fields(body.changes) if table == "team_members" else body.changes)
+        updated = db.update_record(table, record_id, **fields)
+        if table == "tasks" and "assignees" in fields:
+            notify.assignment_changed(event_id, updated, record.assignees, updated.assignees, request.state.user.id, _actor(request))
+        if table == "team_members":
+            team.after_member_saved(event_id, record_id)
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc).splitlines()[0], "detail": str(exc)})
     label = getattr(updated, "title", None) or getattr(updated, "name", None) or getattr(updated, "description", record_id)
-    changes.log_activity(event_id, "organizer", "edit", f"Updated {record_type.replace('_', ' ')} '{label}': "
-                         + ", ".join(f"{k} = {v}" for k, v in body.changes.items()), record_id)
+    shown = {k: (team.names_for(event_id, v) if k == "assignees" else v) for k, v in fields.items() if not (k == "owner" and "assignees" in fields)}
+    changes.log_activity(event_id, _actor(request), "edit", f"Updated {record_type.replace('_', ' ')} '{label}': "
+                         + ", ".join(f"{k} = {v}" for k, v in shown.items()), record_id)
     return {"record": updated.model_dump(mode="json"), "health": planning.event_health(event_id)}
+
+
+PERSON_CREATABLE = {"member", "task", "deadline"}
+
+
+class RecordCreate(BaseModel):
+    fields: dict
+
+
+@app.post("/api/events/{event_id}/records/{record_type}")
+def create_record(request: Request, event_id: str, record_type: str, body: RecordCreate):
+    """A person adds a team member, task, or deadline directly (validated, applied right away, logged)."""
+    _require_event(event_id)
+    if record_type not in PERSON_CREATABLE:
+        raise HTTPException(status_code=404, detail=f"Can't create '{record_type}' here.")
+    table, prefix = changes.RECORD_TYPES[record_type]
+    fields = {k: v for k, v in body.fields.items() if k not in ("id", "event_id")} | {"event_id": event_id}
+    if table in ("tasks", "deadlines", "team_members"):
+        fields.setdefault("source", "user")
+    try:
+        if table == "tasks":
+            fields = team.normalize_task_fields(event_id, fields)
+        elif table == "team_members":
+            fields = team.validate_member_fields(fields)
+        record = db.create_record(table, prefix, **fields)
+        if table == "team_members":
+            team.after_member_saved(event_id, record.id)
+        if table == "tasks" and record.assignees:
+            notify.assignment_changed(event_id, record, [], record.assignees, request.state.user.id, _actor(request))
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc).splitlines()[0], "detail": str(exc)})
+    label = getattr(record, "title", None) or getattr(record, "name", record.id)
+    changes.log_activity(event_id, _actor(request), "create", f"Added {record_type} '{label}'", record.id)
+    return {"record": record.model_dump(mode="json"), "health": planning.event_health(event_id)}
+
+
+@app.delete("/api/events/{event_id}/records/{record_type}/{record_id}")
+def delete_record(request: Request, event_id: str, record_type: str, record_id: str):
+    _require_event(event_id)
+    if record_type not in PERSON_CREATABLE:
+        raise HTTPException(status_code=404, detail=f"Can't delete '{record_type}' here.")
+    table = changes.RECORD_TYPES[record_type][0]
+    record = db.get_record(table, record_id)
+    if record is None or record.event_id != event_id:
+        raise HTTPException(status_code=404, detail=f"Unknown {record_type} '{record_id}'.")
+    untouched = team.remove_member(event_id, record_id) if table == "team_members" else (db.delete_record(table, record_id) and 0)
+    label = getattr(record, "title", None) or getattr(record, "name", record_id)
+    changes.log_activity(event_id, _actor(request), "delete", f"Removed {record_type} '{label}'"
+                         + (f" (taken off {untouched} task{'s' if untouched != 1 else ''})" if untouched else ""), record_id)
+    return {"ok": True, "health": planning.event_health(event_id)}
+
+
+# ---- Notifications and "My work" -------------------------------------------------------------------
+
+
+@app.get("/api/notifications")
+def notifications(request: Request):
+    return notify.for_user(request.state.user)
+
+
+class ReadRequest(BaseModel):
+    ids: Optional[list[str]] = None  # omit to mark everything read
+
+
+@app.post("/api/notifications/read")
+def notifications_read(request: Request, body: ReadRequest = ReadRequest()):
+    ids = [i for i in (body.ids or []) if not i.startswith("approvals:")] or None
+    return {"marked": notify.mark_read(request.state.user, ids if body.ids else None)}
+
+
+@app.get("/api/me/work")
+def my_work(request: Request):
+    return notify.my_work(request.state.user)
+
+
+class PmoRequest(BaseModel):
+    member_id: str
+
+
+@app.post("/api/events/{event_id}/team/pmo")
+def set_pmo(request: Request, event_id: str, body: PmoRequest):
+    _require_event(event_id)
+    try:
+        team.set_pmo(event_id, body.member_id)
+    except team.TeamError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    name = db.get_record("team_members", body.member_id).name
+    changes.log_activity(event_id, _actor(request), "team", f"Made {name} the PMO", body.member_id)
+    return {"team": team.workload(event_id)}
+
+
+# ---- Team updates, status reports, meeting notes, post-event feedback ---------------------------------
+
+
+def _lead_only(request: Request, event_id: str, what: str):
+    if not notify.access_for(event_id, request.state.user)["is_lead"]:
+        return JSONResponse(status_code=403, content={"error": f"Only the PMO or an event lead can {what}."})
+    return None
+
+
+def _ai_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, team_writers.Blocked):
+        return JSONResponse(status_code=403, content={"error": "That text looks like a prompt-injection attempt, so it was blocked and logged.",
+                                                      "blocked": True, "incident_id": exc.check.get("incident_id")})
+    if isinstance(exc, ValueError):
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+    return JSONResponse(status_code=502, content={"error": f"The AI couldn't finish just now ({type(exc).__name__}). Try again."})
+
+
+@app.get("/api/events/{event_id}/announcements")
+def list_announcements(request: Request, event_id: str):
+    _require_event(event_id)
+    return {"announcements": notify.announcements(event_id), "can_post": notify.access_for(event_id, request.state.user)["is_lead"]}
+
+
+class AnnouncementIn(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    body: str = Field(min_length=3, max_length=2000)
+    ai_drafted: bool = False
+
+
+@app.post("/api/events/{event_id}/announcements")
+def post_announcement(request: Request, event_id: str, body: AnnouncementIn):
+    _require_event(event_id)
+    if denied := _lead_only(request, event_id, "post a team update"):
+        return denied
+    check = security.inspect_inbound_input(event_id, f"{body.title}\n{body.body}", source="team_update")
+    if not check["allowed"]:
+        return _ai_error(team_writers.Blocked(check))
+    row = notify.announce(event_id, body.title.strip(), body.body.strip(), request.state.user.id, _actor(request), body.ai_drafted)
+    changes.log_activity(event_id, _actor(request), "announcement", f"Posted a team update: {row['title']} (sent to {row['notified']})", row["id"])
+    return row
+
+
+class DraftNote(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+@app.post("/api/events/{event_id}/announcements/draft")
+def draft_announcement(request: Request, event_id: str, body: DraftNote = DraftNote()):
+    _require_event(event_id)
+    if denied := _lead_only(request, event_id, "post a team update"):
+        return denied
+    if body.note.strip() and not security.inspect_inbound_input(event_id, body.note, source="team_update")["allowed"]:
+        return _ai_error(team_writers.Blocked({}))
+    try:
+        return team_writers.draft_announcement(event_id, body.note)
+    except Exception as exc:  # noqa: BLE001 - shown to the person as a retryable error
+        return _ai_error(exc)
+
+
+class StatusReportIn(BaseModel):
+    audience: str = "chair"
+
+
+@app.post("/api/events/{event_id}/status-report")
+def write_status_report(request: Request, event_id: str, body: StatusReportIn):
+    _require_event(event_id)
+    if body.audience not in team_writers.AUDIENCES:
+        return JSONResponse(status_code=422, content={"error": f"Audience must be one of {', '.join(team_writers.AUDIENCES)}."})
+    try:
+        return team_writers.status_report(event_id, body.audience, _actor(request))
+    except Exception as exc:  # noqa: BLE001
+        return _ai_error(exc)
+
+
+class NotesIn(BaseModel):
+    notes: str = Field(max_length=team_writers.MAX_NOTES_CHARS + 1000)
+
+
+@app.post("/api/events/{event_id}/team/notes-to-tasks")
+def meeting_notes_to_tasks(event_id: str, body: NotesIn):
+    _require_event(event_id)
+    try:
+        return team_writers.notes_to_tasks(event_id, body.notes)
+    except Exception as exc:  # noqa: BLE001
+        return _ai_error(exc)
+
+
+@app.get("/api/events/{event_id}/feedback")
+def event_feedback(event_id: str):
+    _require_event(event_id)
+    return {"summary": team_writers.latest_feedback(event_id)}
+
+
+class FeedbackIn(BaseModel):
+    responses: str = Field(max_length=team_writers.MAX_FEEDBACK_CHARS + 1000)
+
+
+@app.post("/api/events/{event_id}/feedback/summarize")
+def summarize_feedback(event_id: str, body: FeedbackIn):
+    _require_event(event_id)
+    try:
+        return team_writers.summarize_feedback(event_id, body.responses)
+    except Exception as exc:  # noqa: BLE001
+        return _ai_error(exc)
+
+
+def _actor(request: Request) -> str:
+    user = getattr(request.state, "user", None)
+    return user.display_name if user else "organizer"
 
 
 # ---- Inbox Watcher, flags, and the Daily Brief -------------------------------------------------------
@@ -420,7 +869,7 @@ class FlagUpdate(BaseModel):
 
 
 @app.post("/api/events/{event_id}/flags/{flag_id}")
-def update_flag(event_id: str, flag_id: str, body: FlagUpdate):
+def update_flag(request: Request, event_id: str, flag_id: str, body: FlagUpdate):
     """Resolve or dismiss a stored flag. Rule-based flags clear on their own once the underlying data is fixed."""
     _require_event(event_id)
     if flag_id.startswith("sys_"):
@@ -429,7 +878,7 @@ def update_flag(event_id: str, flag_id: str, body: FlagUpdate):
     if f is None or f.event_id != event_id:
         raise HTTPException(status_code=404, detail=f"Unknown flag '{flag_id}'.")
     updated = db.update_record("flags", flag_id, status=body.status)
-    changes.log_activity(event_id, "organizer", "flag", f"Marked flag '{f.title}' {body.status.lower()}", flag_id)
+    changes.log_activity(event_id, _actor(request), "flag", f"Marked flag '{f.title}' {body.status.lower()}", flag_id)
     return updated.model_dump()
 
 
@@ -472,13 +921,13 @@ class CommitRequest(BaseModel):
 
 
 @app.post("/api/events/{event_id}/crisis/commit")
-def commit_crisis(event_id: str, body: CommitRequest):
+def commit_crisis(request: Request, event_id: str, body: CommitRequest):
     """Human-approved commit: Layer 2 re-check -> SQLite -> history (public banner + .ics) -> fresh event state."""
     result = commit_resolution_plan(event_id, body.run_id, body.option_choice)
     if not result["ok"]:
         return JSONResponse(status_code=409, content=result)
     moves = "; ".join(f"{c['title']}: {c['from']} -> {c['to']}" for c in result["applied_changes"]) or "room status only"
-    changes.log_activity(event_id, "organizer", "resolve", f"Approved {result['option_label']} ({moves})", body.run_id)
+    changes.log_activity(event_id, _actor(request), "resolve", f"Approved {result['option_label']} ({moves})", body.run_id)
     if body.flag_id and not body.flag_id.startswith("sys_"):
         f = db.get_record("flags", body.flag_id)
         if f is not None and f.event_id == event_id:
@@ -654,6 +1103,78 @@ def gmail_status():
 @app.post("/api/connectors/gmail/check")
 def gmail_check():
     return gmail.check_connection()
+
+
+# ---- Connect Gmail in the app (per user, read-only) --------------------------------------------------
+
+
+GMAIL_SETUP = [
+    {"step": "Create a Google Cloud project (signed in as the inbox you'll connect)", "url": "https://console.cloud.google.com/projectcreate"},
+    {"step": "Enable the Gmail API", "url": "https://console.cloud.google.com/apis/library/gmail.googleapis.com"},
+    {"step": "Set up the sign-in screen: External, Testing; add your address under Test users", "url": "https://console.cloud.google.com/auth/audience"},
+    {"step": "Create an OAuth client: Desktop app, then Download JSON", "url": "https://console.cloud.google.com/auth/clients/create"},
+    {"step": "Save it as gmail_credentials.json in the Final Project folder (or mcp_servers/), then come back and click Connect Gmail", "url": ""},
+]
+
+
+@app.get("/api/gmail/status")
+def gmail_app_status(request: Request):
+    conn = google_gmail.connection(request.state.user)
+    return {"client_file": google_gmail.client_file() is not None, "connected": conn is not None, "email": (conn or {}).get("email"),
+            "connected_at": (conn or {}).get("connected_at"), "read_only": True, "setup": GMAIL_SETUP}
+
+
+class ConnectRequest(BaseModel):
+    return_to: str = Field(default="#/", max_length=200)
+
+
+@app.post("/api/gmail/connect")
+def gmail_app_connect(request: Request, body: ConnectRequest = ConnectRequest()):
+    try:
+        uri = google_gmail.redirect_uri_for(request.url.hostname or "", request.url.port)
+        return {"auth_url": google_gmail.start_connect(request.state.user, uri, body.return_to)}
+    except google_gmail.GmailError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+@app.post("/api/gmail/disconnect")
+def gmail_app_disconnect(request: Request):
+    return {"disconnected": google_gmail.disconnect(request.state.user)}
+
+
+class GmailPreviewRequest(BaseModel):
+    after: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    before: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    keywords: str = Field(default="", max_length=200)
+    sender: str = Field(default="", max_length=200)
+    limit: int = Field(default=30, ge=1, le=google_gmail.MAX_PREVIEW)
+
+
+@app.post("/api/events/{event_id}/gmail/preview")
+def gmail_app_preview(request: Request, event_id: str, body: GmailPreviewRequest = GmailPreviewRequest()):
+    """List matching emails (headers and snippet only: no AI, no cost) and mark which look related to this event."""
+    _require_event(event_id)
+    try:
+        return google_gmail.preview(request.state.user, event_id, body.after, body.before, body.keywords, body.sender, body.limit)
+    except (google_gmail.GmailError, httpx.HTTPError) as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
+
+
+class GmailImportRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=google_gmail.MAX_IMPORT)
+
+
+@app.post("/api/events/{event_id}/gmail/import")
+def gmail_app_import(request: Request, event_id: str, body: GmailImportRequest):
+    """Import only the ticked emails and run the Inbox Watcher on them."""
+    _require_event(event_id)
+    try:
+        result = google_gmail.import_selected(request.state.user, event_id, body.ids)
+    except (google_gmail.GmailError, httpx.HTTPError) as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
+    if result["imported"]:
+        changes.log_activity(event_id, _actor(request), "gmail", f"Imported {result['imported']} email(s) from Gmail")
+    return result
 
 
 class GmailSyncRequest(BaseModel):

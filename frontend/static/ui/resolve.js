@@ -231,7 +231,7 @@ function bindReview() {
     try { await navigator.clipboard.writeText(`${m.subject_or_header}\n\n${m.message_body}`); toast("Copied"); } catch { toast("Copy isn't available here", "bad"); }
   }));
   st.root.querySelector("#commit")?.addEventListener("click", async (e) => {
-    busy(e.currentTarget, true, "Checking and saving…");
+    busy(e.target.closest("button"), true, "Checking and saving…");
     const from = st.ctx.from || {};
     try {
       st.committed = await post(`${E()}/crisis/commit`, { run_id: st.run.run_id, option_choice: st.choice, flag_id: from.flag_id || null, message_id: from.message_id || null });
@@ -240,7 +240,7 @@ function bindReview() {
       await st.ctx.refresh();
     } catch (err) {
       toast(err.message, "bad");
-      busy(e.currentTarget, false);
+      busy(e.target.closest("button"), false);
       return;
     }
     resultView();

@@ -28,6 +28,7 @@ from backend import database as db  # noqa: E402
 from backend.agents.solver_agent import SolverOutput, _deterministic_plans, verify_plan  # noqa: E402
 from backend.agents.triage_agent import AttendanceUpdate, DisruptionAssessment, RoomStatusUpdate  # noqa: E402
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 from backend.connectors import gmail  # noqa: E402
 from backend.orchestrator import WarRoomRunResult, _save_run  # noqa: E402
 
@@ -144,7 +145,8 @@ def resolve_tests(client: TestClient) -> None:
 def settings_tests(client: TestClient) -> None:
     header("4. AI usage and safety page: its data and the new UI")
     shell = client.get("/").text
-    check("the top bar links to the new page (#/settings), not the old console", 'href="#/settings"' in shell and 'href="/classic"' not in shell)
+    menu = client.get("/static/ui/auth.js").text
+    check("the profile menu links to the new page (#/settings), not the old console", 'href="#/settings"' in menu and 'href="/classic"' not in shell + menu)
     for m in ("resolve.js", "settings.js"):
         a = client.get(f"/static/ui/{m}")
         check(f"{m} served ({len(a.content):,} bytes)", a.status_code == 200 and a.headers.get("cache-control") == "no-cache")
@@ -161,6 +163,7 @@ def settings_tests(client: TestClient) -> None:
 
 if __name__ == "__main__":
     with TestClient(app) as client:
+        login(client)
         db.reset_demo_db()
         gmail_tests(client)
         resolve_tests(client)

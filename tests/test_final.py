@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from backend import database as db  # noqa: E402
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 
 YBVS = "evt_ybvs_2026"
 EVIDENCE = REPO_ROOT / "docs" / "evidence" / "stagecraft-evidence.json"
@@ -30,7 +31,7 @@ SECTIONS = {"generated_at", "how_to_read", "system", "connectors", "tokenomics",
 # third-party module -> requirements.txt package
 PACKAGES = {"fastapi": "fastapi", "uvicorn": "uvicorn", "pydantic": "pydantic", "pydantic_ai": "pydantic-ai", "dotenv": "python-dotenv",
             "httpx": "httpx", "openai": "openai", "mcp": "mcp", "jinja2": "jinja2"}
-STDLIB = set(sys.stdlib_module_names) | {"backend", "__future__"}
+STDLIB = set(sys.stdlib_module_names) | {"backend", "__future__", "_auth"}  # _auth = the tests' login helper
 
 
 def check(label: str, condition: bool) -> None:
@@ -138,7 +139,8 @@ def docs(client: TestClient) -> None:
     check(".env.example lists exactly the staff key names", {"PORTKEY_API_KEY", "OPENAI_API_KEY"} <= set(re.findall(r"^([A-Z_]+)=", (REPO_ROOT / ".env.example").read_text(), re.M)))
 
     pages = ["/", "/classic", f"/live/{YBVS}", "/static/ui/app.css"] + [f"/static/ui/{m}" for m in
-             ("main.js", "workspace.js", "chat.js", "resolve.js", "settings.js", "modals.js", "core.js", "icons.js")]
+             ("main.js", "workspace.js", "chat.js", "resolve.js", "settings.js", "modals.js", "core.js", "icons.js",
+              "auth.js", "people.js", "team.js", "charts.js", "visuals.js", "account.js", "theme.js", "theme-boot.js", "live.js", "notifications.js", "gmail.js", "updates.js")]
     bad = [p for p in pages if client.get(p).status_code != 200]
     check(f"every page and asset in the demo loads ({len(pages)})", not bad)
     for path in ("/api/home", f"/api/events/{YBVS}/planning", f"/api/events/{YBVS}/inbox", f"/api/events/{YBVS}/crisis/runs",
@@ -149,6 +151,7 @@ def docs(client: TestClient) -> None:
 if __name__ == "__main__":
     install_and_secrets()
     with TestClient(app) as client:
+        login(client)
         db.reset_demo_db()
         evidence(client)
         docs(client)

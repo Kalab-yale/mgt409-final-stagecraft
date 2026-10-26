@@ -27,6 +27,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from backend import database as db  # noqa: E402
 from backend.app import app  # noqa: E402
+sys.path.insert(0, str(REPO_ROOT / "tests"))
+from _auth import login  # noqa: E402
 
 YBVS = "evt_ybvs_2026"
 E = f"/api/events/{YBVS}"
@@ -54,6 +56,7 @@ def ok(r):
 
 def export_only() -> None:
     with TestClient(app) as c:
+        login(c)
         rt = ok(c.post("/api/admin/security/red-team-test", json={"event_id": YBVS}))
         bundle = ok(c.get("/api/admin/export-evidence"))
         OUT.mkdir(parents=True, exist_ok=True)
@@ -65,6 +68,7 @@ def export_only() -> None:
 def main(keep_data: bool) -> None:
     t0 = time.perf_counter()
     with TestClient(app) as c:
+        login(c)
         db.reset_demo_db()
         presets = {p.title: p.prompt_text for p in db.get_crisis_presets(YBVS)}
 

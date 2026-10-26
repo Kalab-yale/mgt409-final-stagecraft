@@ -99,13 +99,13 @@ function benchHtml(b) {
 
 function bindBench() {
   root.querySelector("#bench-run")?.addEventListener("click", async (e) => {
-    busy(e.currentTarget, true, "Running both modes (about a minute)…");
+    busy(e.target.closest("button"), true, "Running both modes (about a minute)…");
     try {
       const b = await post("/api/admin/tokenomics/benchmark", { use_cached: false });
       root.querySelector("#bench").innerHTML = benchHtml(b);
       toast("Comparison finished");
       bindBench();
-    } catch (err) { toast(err.message, "bad"); busy(e.currentTarget, false); }
+    } catch (err) { toast(err.message, "bad"); busy(e.target.closest("button"), false); }
   });
 }
 
@@ -143,13 +143,13 @@ async function safetySection() {
     const body = {};
     root.querySelectorAll("[data-num]").forEach((i) => { body[i.dataset.num] = Number(i.value); });
     root.querySelectorAll("[data-tog]").forEach((t) => { body[t.dataset.tog] = t.getAttribute("aria-checked") === "true"; });
-    busy(e.currentTarget, true);
+    busy(e.target.closest("button"), true);
     try { await post("/api/admin/security/update-config", body); toast("Saved"); } catch (err) { toast(err.message, "bad"); }
-    busy(e.currentTarget, false);
+    busy(e.target.closest("button"), false);
   });
   root.querySelectorAll("[data-tog]").forEach((t) => t.addEventListener("click", () => t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true")));
   root.querySelector("#redteam").addEventListener("click", async (e) => {
-    busy(e.currentTarget, true, "Attacking…");
+    busy(e.target.closest("button"), true, "Attacking…");
     try {
       const r = await post("/api/admin/security/red-team-test");
       root.querySelector("#redteam-out").innerHTML = `<p style="margin-bottom:6px"><span class="pill ${r.all_passed ? "green" : "red"}">${r.all_passed ? "All attacks stopped" : "Some attacks got through"}</span></p>
@@ -158,7 +158,7 @@ async function safetySection() {
           <div class="tiny muted">Stopped by ${esc(LAYERS.find((l) => x.layer.startsWith(l.key))?.name || x.layer)}${x.details?.length ? ` · ${esc(x.details[0])}` : ""}</div></div></div>`).join("")}`;
       safetyCountsRefresh();
     } catch (err) { toast(err.message, "bad"); }
-    busy(e.currentTarget, false);
+    busy(e.target.closest("button"), false);
   });
 }
 
@@ -176,7 +176,7 @@ const tog = (k, label, v) => `<div class="field-row"><span class="small">${label
 
 // ================= Connections =================
 async function connectionsSection() {
-  const [sys, gm] = await Promise.all([api("/api/admin/system"), api("/api/connectors/gmail/status")]);
+  const [sys, gm, mine] = await Promise.all([api("/api/admin/system"), api("/api/connectors/gmail/status"), api("/api/gmail/status")]);
   root.innerHTML = `
     <div class="grid-2">
       <div class="card"><div class="card-head"><h3>${icon("sparkles")} AI model</h3><span class="pill ${sys.api_key_loaded ? "green" : "red"}">${sys.api_key_loaded ? "Connected" : "No API key"}</span></div>
@@ -184,13 +184,12 @@ async function connectionsSection() {
           <div><span class="muted">Model:</span> ${esc(sys.model)}</div><div><span class="muted">Through:</span> ${esc(sys.provider)}</div>
           <div><span class="muted">API key:</span> ${sys.api_key_loaded ? `loaded from ${esc(sys.env_files_found.join(", "))} (never shown or sent to the browser)` : "add PORTKEY_API_KEY to .env"}</div>
           <div><span class="muted">Price per million tokens:</span> $${sys.pricing_per_1m_tokens.input} input · $${sys.pricing_per_1m_tokens.cached_input} cached · $${sys.pricing_per_1m_tokens.output} output</div></div></div>
-      <div class="card"><div class="card-head"><h3>${icon("mail")} Gmail</h3><span class="pill ${gm.mode === "gmail" ? "green" : ""}">${gm.mode === "gmail" ? "Connected" : "Using the demo inbox"}</span></div>
+      <div class="card"><div class="card-head"><h3>${icon("mail")} Gmail</h3><span class="pill ${mine.connected ? "green" : ""}">${mine.connected ? "Connected" : "Not connected"}</span></div>
         <div class="card-body small stack" style="gap:8px">
-          <p>${esc(gm.note)} Read-only: Stagecraft searches and reads email through the course Gmail MCP server and never sends.</p>
-          ${gm.available && !gm.signed_in ? `<ol style="margin:0;padding-left:18px">${gm.setup_steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
-            <div class="mail-body" style="font-family:ui-monospace,Menlo,monospace;font-size:12px">${esc(gm.login_command)}</div>` : ""}
-          ${gm.available ? `<div class="row"><button class="btn sm" id="gm-check">Test connection</button><span id="gm-out" class="small"></span></div>` : ""}
-          <p class="tiny faint">Import emails from an event's Inbox tab.</p></div></div>
+          <p>${mine.connected ? `Your inbox <b>${esc(mine.email || "")}</b> is connected, read-only.` : mine.client_file ? "Google sign-in is set up. Connect your inbox from Account settings or the Inbox tab." : "Needs a one-time Google setup (the Inbox tab's Import from Gmail shows the steps)."}
+            Each organizer connects their own inbox; you choose dates and which emails to import, and Stagecraft never sends.</p>
+          <p class="tiny faint">Alternative for developers: the course Gmail MCP server (${gm.signed_in ? "signed in" : "not signed in"}) at <code>/api/events/{id}/gmail/sync</code>.</p>
+          <div class="row"><a class="btn sm" href="#/account/profile">${icon("user")} Manage in Account settings</a></div></div></div>
       <div class="card"><div class="card-head"><h3>${icon("cloud")} Weather and travel</h3><span class="pill green">Connected</span></div>
         <div class="card-body small">${esc(sys.weather_source)}. Used for travel-risk flags and by the Triage agent.</div></div>
       <div class="card"><div class="card-head"><h3>${icon("clipboard")} Evidence for the write-up</h3></div>
@@ -201,10 +200,5 @@ async function connectionsSection() {
     <div class="card"><div class="card-head"><h3>${icon("venue")} Venues</h3><span class="muted small">${sys.venues.length} on file</span></div>
       <div class="card-body">${sys.venues.map((v) => `<div class="list-row"><div class="grow"><div style="font-weight:500">${esc(v.name)}</div>
         <div class="tiny muted">${esc(v.city)}, ${esc(v.state_or_country)} · ${esc(v.airport_corridor)}</div></div><span class="small muted">${v.room_count} rooms</span></div>`).join("")}</div></div>`;
-  root.querySelector("#gm-check")?.addEventListener("click", async (e) => {
-    busy(e.currentTarget, true, "Testing…");
-    try { const r = await post("/api/connectors/gmail/check"); root.querySelector("#gm-out").innerHTML = `<span style="color:${r.ok ? "var(--green)" : "var(--red)"}">${esc(r.reason)}</span>`; }
-    catch (err) { toast(err.message, "bad"); }
-    busy(e.currentTarget, false);
-  });
+
 }

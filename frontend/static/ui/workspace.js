@@ -1,12 +1,17 @@
 // The event workspace: header, tabs, the seven tab screens, and the assistant panel beside them.
-import { bindChangeActions, changeCard, mountChat, prefillChat } from "./chat.js";
+import { bindChangeActions, changeCard, mountChat, prefillChat, setApprover } from "./chat.js";
 import { api, busy, daysLabel, deadlineTone, DIM_TAB, esc, fmtDate, fmtLong, fmtWhen, money, pct, post, sevTone, statusTone, TABS, toast } from "./core.js";
 import { icon } from "./icons.js";
-import { openGmailImport, openPasteEmail } from "./modals.js";
+import { openGmail, reopenIfReturning } from "./gmail.js";
+import { openPasteEmail } from "./modals.js";
+import { avatarStack, openAssign } from "./people.js";
 import { renderResolve } from "./resolve.js";
+import { renderTeam } from "./team.js";
+import { mountTeamUpdates, openFeedback, openMeetingNotes, openStatusReport } from "./updates.js";
+import { attendeeCharts, budgetChart, roadmap, scheduleGrid } from "./visuals.js";
 
 const ws = { id: null, tab: "overview", ev: null, plan: null, changes: [], activity: [], inbox: null, brief: null, weather: null,
-             mailFilter: "Needs Reply", mailId: null, att: { q: "", status: "", type: "", dietary: "", page: 0 }, prompt: "", nav: 0,
+             mailFilter: "Needs Reply", mailId: null, schedView: "grid", att: { q: "", status: "", type: "", dietary: "", page: 0 }, prompt: "", nav: 0,
              resolveFrom: null };  // what "Resolve with the agents" was clicked on (flag or email)
 let els = {};
 let mountedChat = "";  // "eventId:tab" the panel currently shows; remount only when it changes
@@ -50,6 +55,7 @@ export async function showWorkspace(app, crumb, eventId, tab) {
 async function loadCore() {
   const [ev, plan, ch, act] = await Promise.all([api(E()), api(`${E()}/planning`), api(`${E()}/changes`), api(`${E()}/activity?limit=12`)]);
   Object.assign(ws, { ev, plan, changes: ch.changes, activity: act.activity });
+  setApprover(plan.me);
 }
 
 // Reload data after any change and redraw the current tab (the chat panel redraws itself).
@@ -77,7 +83,7 @@ function renderHeader() {
   const e = ws.ev.event, v = ws.ev.venue, h = ws.plan.health;
   const urgent = h.flags.Critical + h.flags.High;
   const inboxCount = ws.plan.inbox.filter((m) => m.status === "New" || m.status === "Needs Reply").length;
-  const badge = { overview: urgent, inbox: inboxCount };
+  const badge = { overview: urgent, inbox: inboxCount, team: ws.plan.team?.unassigned_open_tasks || 0 };
   els.head.innerHTML = `
     <div class="ws-title">
       <div class="grow">
@@ -89,6 +95,7 @@ function renderHeader() {
         </div>
       </div>
       <div class="row">
+        <a class="btn sm" href="#/event/${encodeURIComponent(e.id)}/live" title="Event-day view: now, next, check-in, and a Something broke button">${icon("radio")} Live mode</a>
         <a class="btn sm" href="/live/${encodeURIComponent(e.id)}" target="_blank" rel="noopener">${icon("external")} Attendee page</a>
         <button class="btn sm ${ws.tab === "resolve" ? "active-soft" : ""}" id="resolve-open" title="Day-of problem? Three agents propose a verified fix">${icon("alert")} Resolve an issue</button>
         ${ws.tab === "resolve" ? "" : `<button class="btn primary sm chat-toggle" id="chat-open">${icon("chat")} Assistant</button>`}
@@ -111,7 +118,7 @@ function go(tab, prompt = "") {
 }
 
 async function renderTab() {
-  const r = { overview: overviewTab, program: programTab, venue: venueTab, food: foodTab, attendees: attendeesTab, budget: budgetTab, inbox: inboxTab, resolve: resolveTab }[ws.tab];
+  const r = { overview: overviewTab, team: teamTab, program: programTab, venue: venueTab, food: foodTab, attendees: attendeesTab, budget: budgetTab, inbox: inboxTab, resolve: resolveTab }[ws.tab];
   await r();
 }
 
@@ -130,6 +137,12 @@ function resolveFrom(from) {
   go("resolve");
 }
 
+// Live mode's "Something broke" opens Resolve an issue with the moment's context already written in.
+export function startResolve(eventId, from) {
+  ws.resolveFrom = from;
+  location.hash = `#/event/${encodeURIComponent(eventId)}/resolve`;
+}
+
 function flagsCard(dim, { limit = 6, title = "Red flags" } = {}) {
   const flags = flagsFor(dim);
   if (!flags.length) return dim ? "" : `<div class="card card-pad">${icon("check")} No red flags right now.</div>`;
@@ -140,7 +153,7 @@ function flagsCard(dim, { limit = 6, title = "Red flags" } = {}) {
         <div class="row wrap"><span class="title">${esc(f.title)}</span><span class="pill ${sevTone(f.severity)}">${esc(f.severity)}</span>
           <span class="tiny faint">${esc(SOURCE[f.source] || f.source)}${dim ? "" : ` · ${esc(f.dimension_label)}`}</span></div>
         ${f.detail ? `<p class="small muted" style="margin-top:2px">${esc(f.detail)}</p>` : ""}
-        <div class="row" style="margin-top:4px">
+        <div class="row wrap" style="margin-top:4px;gap:2px 6px">
           <button class="btn plain sm" data-ask="${esc(DIM_TAB[f.dimension])}" data-prompt="${esc(`Help me resolve this: ${f.title}. ${f.detail || ""}`)}">${icon("sparkles")} Ask the assistant</button>
           ${canResolve(f) ? `<button class="btn plain sm" data-resolve-flag="${esc(f.id)}">${icon("alert")} Resolve with the agents</button>` : ""}
           ${f.source !== "system" ? `<button class="btn plain sm" data-flag="${esc(f.id)}" data-status="Resolved">Mark resolved</button>
@@ -180,12 +193,19 @@ function tasksCard(dim, title = "Tasks") {
 }
 
 function taskRow(t) {
+  const byId = Object.fromEntries((ws.plan.team?.members || []).map((m) => [m.id, m]));
   return `<div class="list-row">
     <input type="checkbox" class="checkbox" data-task="${esc(t.id)}" ${t.status === "Done" ? "checked" : ""} aria-label="Mark ${esc(t.title)} done">
     <div class="grow"><div style="${t.status === "Done" ? "text-decoration:line-through;color:var(--text-3)" : ""}">${esc(t.title)}</div>
       <div class="tiny muted">${esc(t.owner || "Unassigned")}${t.due_date ? ` · due ${esc(fmtDate(t.due_date))}` : ""}</div></div>
     ${t.status === "Blocked" ? `<span class="pill red">Blocked</span>` : t.status === "In Progress" ? `<span class="pill blue">In progress</span>` : ""}
+    ${t.status !== "Done" ? `<button class="assign-btn" data-assign-task="${esc(t.id)}" aria-label="Assign ${esc(t.title)}" title="Change owners">${avatarStack(t.assignees, byId, { max: 3 })}</button>` : ""}
   </div>`;
+}
+
+// ================= Team =================
+async function teamTab() {
+  renderTeam({ id: ws.id, plan: ws.plan, root: els.body, refresh, bind: bindCommon });
 }
 
 function kpi(label, value, sub = "", color = "") {
@@ -211,6 +231,10 @@ function bindCommon(root) {
     try { await post(`${E()}/records/${type}/${id}`, { changes }); await refresh(); }
     catch (err) { toast(err.message, "bad"); }
   };
+  root.querySelectorAll("[data-assign-task]").forEach((b) => b.addEventListener("click", () => {
+    const task = allTasks().find((t) => t.id === b.dataset.assignTask);
+    openAssign(b, { eventId: ws.id, task, members: ws.plan.team.members, onSaved: refresh });
+  }));
   root.querySelectorAll("[data-deadline]").forEach((c) => c.addEventListener("change", () => edit("deadline", c.dataset.deadline, { done: c.checked })));
   root.querySelectorAll("[data-task]").forEach((c) => c.addEventListener("change", () => edit("task", c.dataset.task, { status: c.checked ? "Done" : "To Do" })));
   bindChangeActions(root, ws.id, refresh);
@@ -243,27 +267,30 @@ async function overviewTab() {
       ${kpi("Registered", `${h.registrations.active}`, `of ${h.registrations.cap} · ${h.registrations.waitlist} waitlisted`)}
       ${kpi("Budget spent", money(h.budget.spent_usd), `of ${money(h.budget.planned_usd)} planned`)}
     </div>
+    <div class="grid-2">
+      <div class="card" id="updates-card"><div class="card-head"><h3>${icon("bell")} Team updates</h3></div></div>
+      <div class="card"><div class="card-head"><h3>${icon("send")} Share and wrap up</h3><span class="tiny muted">AI drafts, you edit</span></div>
+        <div class="card-body tool-list">
+          <button class="tool" id="tool-report">${icon("mail")}<span><b>Write a status report</b><span class="small muted">For the chair, sponsors, or the SOM events office, from live data</span></span>${icon("next")}</button>
+          <button class="tool" id="tool-notes">${icon("clipboard")}<span><b>Meeting notes to tasks</b><span class="small muted">Paste notes; get tasks with owners and dates to confirm</span></span>${icon("next")}</button>
+          <button class="tool" id="tool-feedback">${icon("chat")}<span><b>Summarize post-event feedback</b><span class="small muted">Themes, sentiment, quotes, and fixes for next year</span></span>${icon("next")}</button>
+        </div></div>
+    </div>
     ${pending.length ? `<div class="card"><div class="card-head"><h3>${icon("clipboard")} Waiting for your review</h3><span class="muted small">${pending.length} drafted change${pending.length === 1 ? "" : "s"}</span></div>
       <div class="card-body"><div class="grid-2">${pending.map((c) => changeCard(c)).join("")}</div></div></div>` : ""}
     <div class="grid-2">
       ${flagsCard(null)}
       ${deadlinesCard(null, { title: "Coming up (next 14 days)", days: 14 })}
     </div>
-    <div class="card"><div class="card-head"><h3>${icon("list")} Workstreams</h3></div><div class="card-body">
-      ${p.initiatives.map((i) => `
-        <div class="list-row">
-          <div class="grow">
-            <div class="row-between"><span style="font-weight:500">${esc(i.title)}</span><span class="pill ${statusTone(i.status)}">${esc(i.status)}</span></div>
-            <div class="row" style="margin:6px 0 3px"><div class="bar grow ${i.status === "Blocked" ? "red" : i.status === "At risk" ? "orange" : ""}"><span style="width:${i.progress_pct}%"></span></div>
-              <span class="small num" style="width:38px;text-align:right">${i.progress_pct}%</span></div>
-            <div class="tiny muted">${esc(i.owner || "Unassigned")} · ${i.tasks_done} of ${i.tasks_total} tasks · target ${esc(fmtDate(i.target_date))}</div>
-          </div>
-        </div>`).join("")}
-    </div></div>
+    ${roadmap(ws.plan, ws.ev.event.date)}
     <div class="card"><div class="card-head"><h3>${icon("clock")} Recent activity</h3></div><div class="card-body">
       ${ws.activity.length ? ws.activity.slice(0, 8).map((a) => `<div class="list-row"><div class="grow small">${esc(a.summary)}</div><span class="tiny faint" style="white-space:nowrap">${esc(a.actor)} · ${esc(fmtWhen(a.at))}</span></div>`).join("")
         : `<p class="muted small">Changes you confirm, emails the Inbox Watcher handles, and briefs show up here.</p>`}
     </div></div>`);
+  mountTeamUpdates(document.getElementById("updates-card"), ws.id);
+  els.body.querySelector("#tool-report").addEventListener("click", () => openStatusReport(ws.id));
+  els.body.querySelector("#tool-feedback").addEventListener("click", () => openFeedback(ws.id));
+  els.body.querySelector("#tool-notes").addEventListener("click", () => openMeetingNotes(ws.id, refresh));
   if (!ws.brief) loadBrief(false);
   else bindBrief();
 }
@@ -319,8 +346,10 @@ async function programTab() {
   const statusDot = (s) => (s === "Confirmed On-Site" ? "green" : s === "In Transit" ? "orange" : "red");
   paint(`
     ${flagsCard("Program", { title: "Program red flags" })}
-    <div class="card"><div class="card-head"><h3>${icon("program")} Schedule</h3><span class="muted small">${st.sessions.length} sessions · ${esc(fmtDate(st.event.date))}</span></div>
-      <div class="card-body">${st.sessions.map((s) => `
+    <div class="card"><div class="card-head"><h3>${icon("program")} Schedule</h3>
+        <div class="row"><span class="muted small">${st.sessions.length} sessions · ${esc(fmtDate(st.event.date))}</span>
+          <div class="segmented" role="tablist" aria-label="Schedule view">${[["grid", "Grid"], ["list", "List"]].map(([k, l]) => `<button class="${ws.schedView === k ? "active" : ""}" data-sv="${k}">${l}</button>`).join("")}</div></div></div>
+      <div class="card-body">${ws.schedView === "grid" ? scheduleGrid(st) : st.sessions.map((s) => `
         <div class="session">
           <div class="time">${esc(s.start_time)}<div class="tiny muted" style="font-weight:400">to ${esc(s.end_time)}</div></div>
           <div class="grow">
@@ -345,6 +374,7 @@ async function programTab() {
             <div style="text-align:right"><div class="small">${esc(s.status)}</div><div class="tiny muted">${esc(s.travel_origin)}</div></div></div>`).join("")}</div></div>
       <div class="stack">${deadlinesCard("Program")}${tasksCard("Program")}</div>
     </div>`);
+  els.body.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => { ws.schedView = b.dataset.sv; programTab(); }));
 }
 
 // ================= Venue =================
@@ -432,13 +462,7 @@ async function attendeesTab() {
   const s = a.by_status, t = a.by_type;
   paint(`
     ${flagsCard("Attendees", { title: "Attendee red flags" })}
-    <div class="kpis">
-      ${kpi("Registered", h.registrations.active, `of ${h.registrations.cap} seats`)}
-      ${kpi("Confirmed", s.Confirmed || 0, `${pct(s.Confirmed || 0, h.registrations.active)}% of registered`)}
-      ${kpi("Waitlist", s.Waitlist || 0, "not yet seated")}
-      ${kpi("Cancelled", s.Cancelled || 0, "")}
-      ${kpi("VIPs", t.VIP || 0, `${t.Sponsor || 0} sponsors · ${t.Press || 0} press`)}
-    </div>
+    ${attendeeCharts(ws.plan)}
     <div class="card"><div class="card-head"><h3>${icon("attendees")} People</h3><span class="muted small" id="att-count"></span></div>
       <div class="card-body">
         <div class="row wrap" style="margin-bottom:10px">
@@ -496,6 +520,7 @@ async function budgetTab() {
       ${kpi("Sponsorship signed", money(h.budget.sponsorship_signed_usd), `${sponsors.length} sponsors`)}
       ${kpi("Over budget", over.length, over.length ? over.map((b) => esc(b.description)).join(", ") : "all lines within plan", over.length ? "var(--red)" : "")}
     </div>
+    ${budgetChart(p)}
     <div class="card"><div class="card-head"><h3>${icon("list")} Workstreams and tasks</h3><span class="muted small">${h.progress_pct}% overall</span></div>
       <div class="card-body">${p.initiatives.map((i) => `
         <details class="list-row" style="display:block" ${i.status === "Blocked" || i.status === "At risk" ? "open" : ""}>
@@ -555,11 +580,11 @@ async function inboxTab() {
   els.body.querySelector("#paste-mail").addEventListener("click", () => openPasteEmail(ws.id, async (r) => {
     ws.mailFilter = "All"; ws.mailId = r.message_id; await refresh();
   }));
-  els.body.querySelector("#gmail-import").addEventListener("click", () => openGmailImport(ws.id, async (r) => {
-    ws.mailFilter = "All"; ws.mailId = r.message_ids?.[0] || null; ws.inbox = null; ws.brief = null; await refresh();
-  }, ws.ev.event.name));
+  const afterGmail = async (r) => { ws.mailFilter = "All"; ws.mailId = r.message_ids?.[0] || null; ws.inbox = null; ws.brief = null; await refresh(); };
+  els.body.querySelector("#gmail-import").addEventListener("click", () => openGmail(ws.id, ws.ev.event.name, afterGmail));
+  reopenIfReturning(ws.id, ws.ev.event.name, afterGmail);
   els.body.querySelector("#process-mail")?.addEventListener("click", async (e) => {
-    busy(e.currentTarget, true, `Reading ${counts.New} emails…`);
+    busy(e.target.closest("button"), true, `Reading ${counts.New} emails…`);
     try {
       const r = await post(`${E()}/inbox/process`);
       toast(`Processed ${r.processed} emails: ${r.needs_reply} need a reply, ${r.flags_raised} flags, ${r.changes_drafted} drafted changes${r.quarantined ? `, ${r.quarantined} quarantined` : ""}`);

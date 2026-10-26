@@ -18,6 +18,7 @@ os.environ["STAGECRAFT_DB_PATH"] = str(Path(_tmp_dir.name) / "test_stagecraft.db
 from fastapi.testclient import TestClient  # noqa: E402
 
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 
 YBVS = "evt_ybvs_2026"
 
@@ -144,5 +145,6 @@ def run(client: TestClient) -> None:
 
 if __name__ == "__main__":
     with TestClient(app) as client:
+        login(client)
         run(client)
     print("\nPASS - Step 11 verified.")

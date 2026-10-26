@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 from datetime import date, datetime, time, timedelta
 
-from backend.models import Attendee, BudgetItem, Deadline, Flag, InboxMessage, Initiative, Task, Vendor
+from backend.models import Attendee, BudgetItem, Deadline, Flag, InboxMessage, Initiative, Task, TeamMember, Vendor
 
 YBVS = "evt_ybvs_2026"
 TECH_AI = "evt_techai_2026"
@@ -24,6 +24,54 @@ TEAM = {
     "registration": "Hannah Okoro",
     "ops": "Chris Nguyen",
 }
+
+
+# The organizing team as records: (name, role, team, is_pmo). Three volunteers join the six owners above, plus the
+# demo login (test@stagecraft.com) as an event lead, so "My work" and notifications have something to show.
+DEMO_LEAD = "Test Organizer"
+ROSTER = [
+    (TEAM["chair"], "Summit chair", "Leadership", False),
+    (TEAM["ops"], "Operations lead and PMO", "Leadership", True),
+    (TEAM["logistics"], "Venue, AV, and catering lead", "Venue and logistics", False),
+    (TEAM["program"], "Program and speakers lead", "Program", False),
+    (TEAM["budget"], "Sponsorship and budget lead", "Sponsorship and budget", False),
+    (TEAM["registration"], "Registration lead", "Registration", False),
+    ("Jordan Lee", "Volunteer coordinator", "Volunteers", False),
+    ("Priya Raman", "Marketing and communications", "Marketing", False),
+    ("Tomás Rivera", "Hospitality volunteer", "Food", False),
+    (DEMO_LEAD, "Event lead (demo account)", "Leadership", False),
+]
+DOMAIN = {YBVS: "ybvs.example", TECH_AI: "techai-summit.example"}
+# Tasks that more than one person owns in the demo (title -> extra people beyond the workstream owner)
+CO_OWNERS = {
+    "Approve AV vendor quote": [TEAM["ops"]],
+    "Collect dietary needs from registrations": [TEAM["registration"], "Tomás Rivera"],
+    "Book flights and Amtrak for out-of-town speakers": ["Jordan Lee"],
+    "Arrange green room and speaker escorts": ["Jordan Lee"],
+    "Sign off the run-of-show": [DEMO_LEAD],
+    "Track actuals against budget weekly": [DEMO_LEAD],
+}
+LEADS = {TEAM["chair"], TEAM["ops"], DEMO_LEAD}  # may approve budget changes
+
+
+def build_team(event_id: str) -> list[TeamMember]:
+    members = []
+    for i, (name, role, team, pmo) in enumerate(ROSTER, 1):
+        email = ("test@stagecraft.com" if name == DEMO_LEAD
+                 else name.lower().replace("á", "a").replace("-", "").replace(" ", ".") + "@" + DOMAIN.get(event_id, "team.example"))
+        members.append(TeamMember(id=f"mem_{event_id[4:]}_{i:02d}", event_id=event_id, name=name, email=email, role=role, team=team,
+                                  is_pmo=pmo, access="Lead" if name in LEADS else "Member"))
+    return members
+
+
+def assign_by_owner(tasks: list[Task], members: list[TeamMember]) -> list[Task]:
+    """Link each task to the member named as its owner (plus any co-owners), and keep `owner` as the display text."""
+    by_name = {m.name: m for m in members}
+    for t in tasks:
+        names = [n for n in [t.owner, *CO_OWNERS.get(t.title, [])] if n in by_name]
+        t.assignees = [by_name[n].id for n in dict.fromkeys(names)]
+        t.owner = ", ".join(dict.fromkeys(names)) or t.owner
+    return tasks
 
 
 def _deadlines(event_id: str, ev: date, rows: list[tuple]) -> list[Deadline]:
@@ -113,7 +161,7 @@ def build_planning_seed(event_dates: dict[str, date], today: date) -> dict[str, 
         ("Room assignments and signage final", "Venue", -5, T["logistics"], False, ""),
         ("Attendee logistics email (directions, Wi-Fi, schedule)", "Attendees", -4, T["registration"], False, ""),
         ("Registration closes", "Attendees", -3, T["registration"], False, ""),
-        ("Run-of-show sign-off with the SOM events office", "General", -2, T["chair"], False, ""),
+        ("Run-of-show sign-off with the SOM events office", "General", -2, f'{T["chair"]}, {DEMO_LEAD}', False, ""),
         ("Budget reconciliation to SOM finance", "Budget", 14, T["budget"], False, ""),
     ])
     ybvs_inits, ybvs_tasks = _plan(YBVS, ev, [
@@ -346,10 +394,12 @@ Zion"""),
          """Would a demo table on the lunch floor be included at the silver tier? If so we're ready to sign."""),
     ])
 
+    ybvs_team, tai_team = build_team(YBVS), build_team(TECH_AI)
     return {
+        "team_members": ybvs_team + tai_team,
         "deadlines": ybvs_deadlines + tai_deadlines,
         "initiatives": ybvs_inits + tai_inits,
-        "tasks": ybvs_tasks + tai_tasks,
+        "tasks": assign_by_owner(ybvs_tasks, ybvs_team) + assign_by_owner(tai_tasks, tai_team),
         "attendees": _attendees(YBVS, 362, today, seed=409) + _attendees(TECH_AI, 280, today, seed=2026),
         "vendors": ybvs_vendors + tai_vendors,
         "budget_items": ybvs_budget + tai_budget,

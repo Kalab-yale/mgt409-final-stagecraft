@@ -23,10 +23,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 from backend import changes, planning  # noqa: E402
 from backend import database as db  # noqa: E402
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 
 YBVS = "evt_ybvs_2026"
 E = f"/api/events/{YBVS}"
-MODULES = ("main.js", "core.js", "icons.js", "workspace.js", "chat.js", "modals.js", "resolve.js", "settings.js")
+MODULES = ("main.js", "core.js", "icons.js", "workspace.js", "chat.js", "modals.js", "resolve.js", "settings.js",
+           "auth.js", "people.js", "team.js", "charts.js", "visuals.js", "account.js", "theme.js", "live.js", "notifications.js", "gmail.js", "updates.js")
 
 
 def check(label: str, condition: bool) -> None:
@@ -63,7 +65,7 @@ def run(client: TestClient) -> None:
     print(f"  tick 'AV vendor quote approved' done -> {r.status_code}, overdue {before} -> {r.json()['health']['overdue_deadlines']}")
     check("ticking an overdue deadline done applies at once and returns fresh health", r.status_code == 200
           and r.json()["record"]["done"] is True and r.json()["health"]["overdue_deadlines"] == before - 1)
-    check("the edit is in the activity log as the organizer's", changes.list_activity(YBVS)[0]["actor"] == "organizer"
+    check("the edit is in the activity log under the signed-in person's name", changes.list_activity(YBVS)[0]["actor"] == "Test Organizer"
           and "AV vendor quote approved" in changes.list_activity(YBVS)[0]["summary"])
     r = client.post(f"{E}/records/task/tsk_ybvs_2026_202", json={"changes": {"status": "Done"}})
     check("ticking the blocked AV task done clears the 'Blocked task' flag",
@@ -79,6 +81,7 @@ def run(client: TestClient) -> None:
 
 if __name__ == "__main__":
     with TestClient(app) as client:
+        login(client)
         db.reset_demo_db()
         run(client)
     print("\nPASS - Phase 4 verified.")

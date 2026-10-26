@@ -16,7 +16,14 @@ The app has three safety layers and cost controls, and logs every AI call with i
 
 | Screen | What it's for |
 |---|---|
-| **Your events** | Every event you're running: days to go, % planned, red flags, registrations, budget, unread email. |
+| **Log in / Create account** | Email and password (passwords are stored as salted scrypt hashes; see [`output/harness.md`](output/harness.md)). Demo account: `test@stagecraft.com` / `password`. |
+| **Account** (profile menu) | Change your name or email, change your password, see and sign out the devices you're logged in on, pick Light / Dark / System theme and an accent colour, delete your account. |
+| **Your events** | A greeting with what needs you across all events, a three-week deadline timeline, and a card per event: days to go, % planned, red flags, registrations, budget, team, next deadlines. |
+| **My work and notifications** | Your tasks, deadlines, and approvals across every event on Home (your account is linked to the team by email); a bell for "assigned to you", urgent red flags on events you lead, and changes waiting for your OK. Only the PMO and leads can approve budget changes. |
+| **Live mode** (event day) | Now / next in every room with countdowns, speaker and room warnings, catering cutoffs, a check-in desk with a live counter, and a big **Something broke** button into Resolve an issue. Before the event it runs as a rehearsal you can scrub or play. |
+| **Team** | The organizing team and its PMO, each person's workload, and who owns which task. Assign a task to one or several people, add people, change the PMO. Unassigned tasks get a one-click **suggested owner** (the lightest-loaded person on that area's team). **Meeting notes to tasks**: paste notes and the AI drafts tasks with owners and due dates for you to confirm. Whoever creates an event becomes its PMO and a lead. |
+| **Team updates** (Overview) | Leads post an update and everyone on the team gets it in their bell; **Draft with AI** writes it from today's deadlines, flags, and changes for the lead to edit. |
+| **Share and wrap up** (Overview) | **Status report**: an email-ready update for the chair, sponsors (no internal budget), or the SOM events office; copy it or open it in your email app. **Post-event feedback**: paste survey answers for sentiment, themes with counts, verified quotes, and fixes for next year. |
 | **Overview** | Today's AI brief (top priorities, risks, what changed), red flags, deadlines for the next 14 days, workstream progress, changes waiting for your OK, recent activity. |
 | **Program / Venue / Food / Attendees / Tasks and budget** | The plan for that part of the event: schedule and speakers, rooms and vendors with live weather, catering and dietary counts, the attendee list (search, filters, waitlist), tasks and budget lines. Tick a deadline or task done directly. |
 | **Inbox** | The Inbox Watcher sorts each email (needs a reply, action, FYI, noise, suspicious), pulls out the key facts, raises red flags, drafts changes and a reply. Phishing and prompt-injection emails are quarantined before any AI reads them. Paste an email, or import from Gmail. |
@@ -27,15 +34,16 @@ The app has three safety layers and cost controls, and logs every AI call with i
 
 ## How it works
 
-Thirteen AI agents (seven of them tab assistants built from one template), each with a narrow job, structured output, and only the tools that job needs. They all run on `gpt-6-luna` through Portkey, using pydantic-ai.
+Eighteen AI agents (eight of them tab assistants built from one template), each with a narrow job, structured output, and only the tools that job needs. They all run on `gpt-6-luna` through Portkey, using pydantic-ai.
 
 | Agent | Job | Writes to the plan? |
 |---|---|---|
-| 7 **tab assistants** (Overview, Program, Venue, Food, Attendees, Tasks and budget, Inbox) | Answer from live data with read tools; draft changes with "propose" tools. Each tab can only touch its own kinds of records. | Only drafts. A person confirms, and the change is re-validated at that moment. |
+| 8 **tab assistants** (Overview, Team, Program, Venue, Food, Attendees, Tasks and budget, Inbox) | Answer from live data with read tools; draft changes with "propose" tools. Each tab can only touch its own kinds of records. | Only drafts. A person confirms, and the change is re-validated at that moment. |
 | **Inbox Watcher** | Per email: category, urgency, key facts, red flags, drafted changes, reply draft. Runs 4 emails in parallel. | Flags yes (deduplicated); changes only as drafts; replies are never sent. |
 | **Brief Writer** | Ranks today's priorities from an exact digest of the data (overdue items, flags, new email, recent changes). | No. Cached once per day. |
 | **Triage → Solver → Comms** (Resolve an issue) | Triage finds the affected sessions, speakers, rooms, and catering. Solver proposes two fixes using an exact room/time search. Comms drafts messages, an attendee banner, and a volunteer checklist. | Only after the organizer approves, and only if the rule checker passes again. |
 | **New-event setup** | Turns a sentence into rooms, speakers, a conflict-free schedule, catering, and a starter plan. | Yes, after validation. |
+| 4 **team writers** (Announcement Writer, Status Reporter, Notes-to-Tasks, Feedback Summarizer) | Draft a team update or a stakeholder status email from the day's digest; turn pasted meeting notes into tasks; summarize post-event survey answers. Notes and survey answers pass the injection firewall first (survey answers line by line). | Tasks only as drafts (owners matched to the roster by code); updates are posted by a lead; code checks the feedback counts and quotes. |
 
 ```
  email / pasted text / issue report
@@ -96,7 +104,9 @@ cp .env.example .env                # then put your PORTKEY_API_KEY in it
 python main.py              # then open http://127.0.0.1:8000   (PORT=8020 python main.py for another port)
 ```
 
-Click **Yale Black Venture Summit (YBVS) 2026**, then try:
+Log in with **test@stagecraft.com / password** (or create an account), click **Yale Black Venture Summit (YBVS) 2026**, then try:
+- **Team → Assign** on any task (pick two people), or **Change PMO**
+- **Live mode** (event header) → drag the clock to 14:40 → **Something broke**
 - **Inbox → Process 14 new emails**
 - **Resolve an issue → Room 2400 AV Failure → Find a fix**
 - **AI usage and safety** (top right)
@@ -121,6 +131,19 @@ python -c "from backend.database import reset_demo_db; reset_demo_db()"
 
 ### Gmail (optional, read-only)
 
+**In the app (recommended):** *Inbox → Import from Gmail → Continue with Google*. Each organizer connects their own inbox (read-only), picks a date range and optional keywords or sender, previews the matches (headers only, no AI, no cost), sees which ones **look related** to the event (from a known vendor, sponsor, speaker, teammate, or attendee, or mentioning the event), ticks what belongs, and imports just those through the Inbox Watcher. Disconnect any time in *Account settings → Connected accounts*.
+
+One-time Google setup (Google requires it for any app that reads Gmail):
+1. Create a project: https://console.cloud.google.com/projectcreate
+2. Enable the Gmail API: https://console.cloud.google.com/apis/library/gmail.googleapis.com
+3. Set up the sign-in screen (External, Testing) and add your address as a test user: https://console.cloud.google.com/auth/audience
+4. Create an OAuth client, type **Desktop app**, and download the JSON: https://console.cloud.google.com/auth/clients/create
+5. Save it as `gmail_credentials.json` in this folder (it's gitignored), or in `../mcp_servers/`.
+
+Open the app at **http://127.0.0.1:8000**: Google sends you back to this computer after sign-in. Tokens are encrypted with a local key (`backend/.secret_key`, gitignored) and never reach the browser.
+
+**Alternative for developers: the course Gmail MCP server.**
+
 Stagecraft is an MCP client of the course Gmail server (`../mcp_servers/mcp_gmail_server.py`). It only calls `search_emails` and `read_email`, and it never sends. Imported emails go through the same firewall and Inbox Watcher as the demo inbox.
 
 To connect:
@@ -134,14 +157,19 @@ Without this, the demo inbox is used. Override the paths with `GMAIL_MCP_SERVER`
 ## Tests
 
 ```bash
-python tests/run_all.py --offline   # 8 suites with no model calls: about 1 minute, $0
-python tests/run_all.py             # all 17 suites with live agent runs: 2-10 minutes (faster when the gateway cache has seen the prompts), under $0.10
+python tests/run_all.py --offline   # 12 suites with no model calls: about 1 minute, $0
+python tests/run_all.py             # all 22 suites with live agent runs: 2-10 minutes (faster when the gateway cache has seen the prompts), under $0.10
 ```
 
 | Suite | Covers |
 |---|---|
 | `test_step1`–`11` | Config and model ping, data layer, scheduling tools, tokenomics, the 3 safety layers, new-event setup, Triage → Solver → Comms, the API, resolve run/commit, usage and safety API with the live A/B benchmark |
 | `test_phase1`–`5` | Planning data and red-flag rules, tab assistants with confirm-before-save, Inbox Watcher and Daily Brief, the workspace UI, the Gmail MCP connector (against a stand-in server) and resolve approval |
+| `test_phase6` | Accounts (create, log in, log out, wrong-password and lockout handling, how passwords and sessions are stored), the team, PMO, multi-person assignment, and team red flags |
+| `test_phase7` | Security fixes from the login audit (browser headers, per-device rate limits, screened names, API docs off) and account settings (profile, email, password, sessions, theme, delete) |
+| `test_phase8` | My work, notifications (who gets told what), lead-only budget approvals, live-mode check-in |
+| `test_phase10` | The creator of a new event (AI or CSV) becomes its PMO; owner suggestions; team updates (leads only, everyone notified, injection blocked) and the AI draft; status reports (sponsors get no budget data); meeting notes to task drafts; post-event feedback summary with checked counts and quotes |
+| `test_phase9` | Connect Gmail in the app against a fake Google: read-only scope, PKCE, single-use sign-in links, encrypted tokens, refresh, per-user isolation, preview with "looks related", import only the ticked emails, disconnect and revoke |
 | `test_final` | Submission readiness: every dependency listed, no key in any file, evidence complete and consistent, report and slides self-contained with the required sections, the report quotes the evidence, every demo page loads |
 
 ## Evidence
@@ -165,11 +193,14 @@ python scripts/build_docs.py   # embeds docs/screenshots/*.jpg; --repo URL to ch
 ├── main.py                       # python main.py -> server
 ├── backend/
 │   ├── app.py                    # FastAPI: pages + JSON API
+│   ├── auth.py                   # accounts: scrypt password hashes, hashed session tokens, lockout
 │   ├── config.py                 # .env loading, model factory, demo date
 │   ├── models.py                 # Pydantic schemas (event, rooms, sessions, deadlines, tasks, attendees, budget, email, flags)
 │   ├── database.py               # SQLite: tables, migrations, queries, demo reset
 │   ├── seed.py, seed_planning.py # 3 venues, 2 events, ~640 attendees, budgets, vendors, 18 demo emails (all fictional)
 │   ├── planning.py               # deadline status, progress, red-flag rules, event health, starter plan
+│   ├── team.py                   # organizing team: PMO, multi-person assignment, workload
+│   ├── notify.py                 # accounts <-> team (by email), roles, notifications, My work
 │   ├── changes.py                # confirm-before-save: drafts, re-validation, activity log, chat history
 │   ├── tools.py                  # constraint checker, exact room/time solver, catering math, weather risk
 │   ├── tokenomics.py             # per-call metering, Cost-Saver context pruning, scale projections
@@ -177,15 +208,21 @@ python scripts/build_docs.py   # embeds docs/screenshots/*.jpg; --repo URL to ch
 │   ├── orchestrator.py           # safety check -> Triage -> Solver -> Comms; approve; .ics; run history
 │   ├── benchmark.py              # Cost-Saver OFF vs ON on the same issue, with a quality check
 │   ├── evidence.py               # system status and the evidence bundle
-│   ├── connectors/gmail.py       # MCP client of the course Gmail server (read-only)
-│   └── agents/                   # assistants, inbox_watcher, brief_writer, triage, solver, comms, onboarding, common (guarded runs)
+│   ├── connectors/google_gmail.py # Connect Gmail in the app: Google sign-in, encrypted per-user tokens, preview, related, import
+│   ├── connectors/gmail.py       # alternative: MCP client of the course Gmail server (read-only)
+│   └── agents/                   # assistants, inbox_watcher, brief_writer, team_writers (updates, status report, notes->tasks,
+│                                 # feedback), triage, solver, comms, onboarding, common (guarded runs)
 ├── frontend/
 │   ├── templates/                # app.html (workspace), public_live.html (attendee page), classic.html (first build)
-│   └── static/ui/                # main.js, workspace.js, chat.js, resolve.js, settings.js, modals.js, core.js, icons.js, app.css
+│   └── static/ui/                # main.js (home), auth.js, workspace.js, team.js, people.js, chat.js, resolve.js, settings.js,
+│                                 # charts.js + visuals.js (rings, bars, timelines, schedule grid), account.js, theme.js + theme-boot.js
+│                                 # (light/dark/accent), live.js (event day), notifications.js (bell), updates.js (team updates, status report,
+│                                 # meeting notes, feedback), modals.js, core.js, icons.js, app.css
 ├── report.html, slides.html      # submission files (built, self-contained)
 ├── scripts/                      # rehearse_demo.py (demo rehearsal + evidence), build_docs.py (report/slides)
+├── output/harness.md             # how the app works, starting with auth
 ├── docs/                         # src/ (report + slides source), screenshots/, evidence/, DEMO_SCRIPT.md
-└── tests/                        # run_all.py, 17 suites, fake_gmail_mcp.py (stand-in Gmail MCP server)
+└── tests/                        # run_all.py, 22 suites, _auth.py (test login), fake_gmail_mcp.py (stand-in Gmail MCP server)
 ```
 
 ## Demo data

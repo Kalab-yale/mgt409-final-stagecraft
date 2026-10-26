@@ -1,8 +1,12 @@
 // Shared helpers: API calls, escaping, formatting, toasts, and the tab registry.
 
 export async function api(path, options = {}) {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  const { quiet401, ...opts } = options;
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, credentials: "same-origin", ...opts });
   const body = await res.json().catch(() => ({}));
+  if (res.status === 401 && !quiet401 && !path.startsWith("/api/auth/")) {
+    location.hash = "#/login";  // session expired or logged out: back to the login screen
+  }
   if (!res.ok) {
     const err = new Error(body.error || body.detail || (body.errors && body.errors[0]) || `Request failed (${res.status})`);
     err.body = body;
@@ -54,6 +58,7 @@ export function busy(button, on, label) {
 // Workspace tabs (ids match the backend assistant tabs) and which tab owns each dimension.
 export const TABS = [
   { id: "overview", label: "Overview", icon: "overview", assistant: "Overview assistant" },
+  { id: "team", label: "Team", icon: "team", assistant: "Team assistant" },
   { id: "program", label: "Program", icon: "program", assistant: "Program assistant" },
   { id: "venue", label: "Venue", icon: "venue", assistant: "Venue assistant" },
   { id: "food", label: "Food", icon: "food", assistant: "Food assistant" },

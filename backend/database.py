@@ -36,6 +36,7 @@ from backend.models import (
     Speaker,
     SpeakerStatus,
     Task,
+    TeamMember,
     Vendor,
     Venue,
 )
@@ -52,6 +53,7 @@ TABLES: dict[str, type[BaseModel]] = {
     "catering_slas": CateringSLA,
     "crisis_presets": CrisisScenarioPreset,
     # planning layer
+    "team_members": TeamMember,
     "deadlines": Deadline,
     "initiatives": Initiative,
     "tasks": Task,
@@ -61,15 +63,16 @@ TABLES: dict[str, type[BaseModel]] = {
     "inbox_messages": InboxMessage,
     "flags": Flag,
 }
-PLANNING_TABLES = ("deadlines", "initiatives", "tasks", "attendees", "vendors", "budget_items", "inbox_messages", "flags")
+PLANNING_TABLES = ("team_members", "deadlines", "initiatives", "tasks", "attendees", "vendors", "budget_items", "inbox_messages", "flags")
 WORKSPACE_TABLES = ("chat_messages", "pending_changes", "activity_log", "daily_briefs")  # chat, drafts, change history, briefs
 
 # Columns added after a table first shipped: (table, column, type). init_db adds any that an older database lacks.
 MIGRATIONS = [
     ("inbox_messages", "category", "TEXT"), ("inbox_messages", "urgency", "TEXT"), ("inbox_messages", "key_facts", "TEXT"),
     ("inbox_messages", "reply_draft", "TEXT"), ("inbox_messages", "processed_at", "TEXT"), ("pending_changes", "origin", "TEXT"),
+    ("tasks", "assignees", "TEXT"), ("team_members", "access", "TEXT DEFAULT 'Member'"),
 ]
-JSON_FIELDS = {"av_specs", "required_av", "speaker_ids", "key_facts"}
+JSON_FIELDS = {"av_specs", "required_av", "speaker_ids", "key_facts", "assignees"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS venues (
@@ -114,9 +117,13 @@ CREATE TABLE IF NOT EXISTS initiatives (
     id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), title TEXT NOT NULL, dimension TEXT NOT NULL,
     owner TEXT, target_date TEXT NOT NULL, description TEXT, blocked INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS team_members (
+    id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), name TEXT NOT NULL, email TEXT, role TEXT, team TEXT NOT NULL,
+    is_pmo INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL, access TEXT DEFAULT 'Member'
+);
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), title TEXT NOT NULL, dimension TEXT NOT NULL,
-    initiative_id TEXT, owner TEXT, due_date TEXT, status TEXT NOT NULL, priority TEXT NOT NULL, source TEXT NOT NULL
+    initiative_id TEXT, owner TEXT, due_date TEXT, status TEXT NOT NULL, priority TEXT NOT NULL, source TEXT NOT NULL, assignees TEXT
 );
 CREATE TABLE IF NOT EXISTS attendees (
     id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(id), name TEXT NOT NULL, email TEXT NOT NULL,
@@ -232,6 +239,16 @@ def init_db() -> None:
             _load_seed(conn)
         elif conn.execute("SELECT COUNT(*) FROM deadlines").fetchone()[0] == 0:
             _backfill_planning(conn)
+        elif conn.execute("SELECT COUNT(*) FROM team_members").fetchone()[0] == 0:
+            _backfill_team(conn)
+    from backend.auth import init_auth  # local import: auth uses this module
+
+    init_auth()  # users, login sessions, and the demo test account (not touched by reset_demo_db)
+    from backend import notify
+    from backend.connectors import google_gmail
+
+    notify.init()
+    google_gmail.init()  # per-user Gmail connections (encrypted tokens) and sign-in states
 
 
 def _backfill_planning(conn: sqlite3.Connection) -> None:
@@ -246,6 +263,21 @@ def _backfill_planning(conn: sqlite3.Connection) -> None:
             _insert(conn, table, record)
 
 
+def _backfill_team(conn: sqlite3.Connection) -> None:
+    """Databases made before teams existed: add the demo organizing team and link existing tasks to it by owner name."""
+    from backend.seed_planning import TECH_AI, YBVS, assign_by_owner, build_team
+
+    for event_id in (YBVS, TECH_AI):
+        if not conn.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone():
+            continue
+        members = build_team(event_id)
+        for m in members:
+            _insert(conn, "team_members", m)
+        tasks = [_from_row(Task, r) for r in conn.execute("SELECT * FROM tasks WHERE event_id = ?", (event_id,))]
+        for t in assign_by_owner(tasks, members):
+            conn.execute("UPDATE tasks SET assignees = ?, owner = ? WHERE id = ?", (json.dumps(t.assignees), t.owner, t.id))
+
+
 def reset_demo_db() -> None:
     """Drop everything and reload the clean seed, so every demo/test starts identical."""
     with connect() as conn:
@@ -255,6 +287,9 @@ def reset_demo_db() -> None:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(SCHEMA)
         _load_seed(conn)
+        for extra in ("notifications", "announcements", "feedback_summaries"):  # they point at demo data that was just reset
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (extra,)).fetchone():
+                conn.execute(f"DELETE FROM {extra}")
 
 
 def _load_seed(conn: sqlite3.Connection) -> None:
@@ -419,6 +454,9 @@ def delete_event(event_id: str, delete_unused_custom_venue: bool = True) -> dict
     with connect() as conn:
         for table in ("resolution_history", *WORKSPACE_TABLES, *PLANNING_TABLES, "crisis_presets", "catering_slas", "sessions", "speakers"):
             conn.execute(f"DELETE FROM {table} WHERE event_id = ?", (event_id,))
+        for extra in ("notifications", "announcements", "feedback_summaries"):
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (extra,)).fetchone():
+                conn.execute(f"DELETE FROM {extra} WHERE event_id = ?", (event_id,))
         conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
         still_used = conn.execute("SELECT 1 FROM events WHERE venue_id = ?", (event.venue_id,)).fetchone()
         if delete_unused_custom_venue and not still_used and event.venue_id not in {v.id for v in SEED_VENUES}:

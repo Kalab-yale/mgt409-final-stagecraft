@@ -24,6 +24,7 @@ from backend import database as db  # noqa: E402
 from backend import planning  # noqa: E402
 from backend.agents.onboarding_agent import import_event_from_csv_or_template  # noqa: E402
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 
 YBVS, TECH_AI = "evt_ybvs_2026", "evt_techai_2026"
 TODAY = date(2026, 10, 24)
@@ -46,8 +47,8 @@ def test_seed_and_dates() -> None:
     header("1. Seed: rich planning data, dated relative to 'today'")
     counts = {t: len(db.list_records(t, YBVS)) for t in db.PLANNING_TABLES}
     print(f"  YBVS: {counts}")
-    check("YBVS seeded: 17 deadlines, 6 initiatives, 27 tasks, 362 attendees, 8 vendors/sponsors, 12 budget lines, 14 emails",
-          counts == {"deadlines": 17, "initiatives": 6, "tasks": 27, "attendees": 362, "vendors": 8, "budget_items": 12,
+    check("YBVS seeded: 10 team members (incl. the demo lead), 17 deadlines, 6 initiatives, 27 tasks, 362 attendees, 8 vendors/sponsors, 12 budget lines, 14 emails",
+          counts == {"team_members": 10, "deadlines": 17, "initiatives": 6, "tasks": 27, "attendees": 362, "vendors": 8, "budget_items": 12,
                      "inbox_messages": 14, "flags": 1})
     check("Tech & AI Summit seeded too", all(len(db.list_records(t, TECH_AI)) > 0 for t in ("deadlines", "initiatives", "attendees", "inbox_messages")))
     check("YBVS is 21 days out, Tech & AI 41 days out", db.get_event(YBVS).date == TODAY + timedelta(days=21)
@@ -173,6 +174,7 @@ def test_api(client: TestClient) -> None:
 
 if __name__ == "__main__":
     with TestClient(app) as client:
+        login(client)
         db.reset_demo_db()
         test_seed_and_dates()
         test_statuses_and_progress()

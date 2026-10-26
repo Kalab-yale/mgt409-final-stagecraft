@@ -4,23 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="refresh" content="60">
-  <meta name="theme-color" content="#ffffff">
   <title>{{ event.name }} · Live schedule</title>
+  <script src="/static/ui/theme-boot.js"></script>
   <link rel="stylesheet" href="/static/ui/app.css">
   <style>
     body { background: var(--bg-subtle); }
-    .live-top { position: sticky; top: 0; z-index: 5; background: rgba(255, 255, 255, .9); backdrop-filter: saturate(180%) blur(16px); border-bottom: 1px solid var(--border); }
+    .live-top { position: sticky; top: 0; z-index: 5; background: var(--topbar-bg); backdrop-filter: saturate(180%) blur(16px); border-bottom: 1px solid var(--border); }
     .live-wrap { max-width: 680px; margin: 0 auto; padding: 0 18px; }
     .live-top .live-wrap { height: 52px; display: flex; align-items: center; justify-content: space-between; }
     .pulse { width: 8px; height: 8px; border-radius: 50%; background: #34a853; position: relative; display: inline-block; }
     .pulse::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: #34a853; opacity: .35; animation: ping 1.8s infinite; }
     @keyframes ping { 75%, 100% { transform: scale(2.2); opacity: 0; } }
     .notice-box { border-radius: 14px; padding: 14px 16px; margin-top: 16px; }
-    .update { background: var(--accent-bg); color: #0b3d78; }
+    .update { background: var(--accent-bg); color: var(--text); }
     .ok { background: var(--green-bg); color: var(--green); }
     .warn { background: var(--orange-bg); color: var(--orange); font-size: 13.5px; }
-    .slot { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
-    .slot.moved { border-color: #9cc6f5; box-shadow: 0 0 0 1px #9cc6f5 inset, var(--shadow); }
+    .slot { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+    .slot.moved { border-color: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent-soft) inset, var(--shadow); }
     .slot .t { font-weight: 600; font-variant-numeric: tabular-nums; }
     .slot .t span { color: var(--text-3); font-weight: 500; }
   </style>

@@ -2,7 +2,7 @@
 import { api, busy, esc, post, toast } from "./core.js";
 import { icon } from "./icons.js";
 
-function modal(title, sub, body) {
+export function modal(title, sub, body) {
   const back = document.createElement("div");
   back.className = "modal-back";
   back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
@@ -118,7 +118,7 @@ export function openPasteEmail(eventId, onDone) {
     const v = (id) => m.el.querySelector(id).value.trim();
     const err = m.el.querySelector("#pe-error");
     if (!v("#pe-email").includes("@") || v("#pe-body").length < 5) { err.innerHTML = `<p class="small" style="color:var(--red)">Add the sender's email and the email text.</p>`; return; }
-    busy(e.currentTarget, true, "Reading…");
+    busy(e.target.closest("button"), true, "Reading…");
     try {
       const r = await post(`/api/events/${encodeURIComponent(eventId)}/inbox/paste`, { from_name: v("#pe-name"), from_email: v("#pe-email"), subject: v("#pe-subject"), body: v("#pe-body") });
       toast(r.status === "Quarantined" ? "Quarantined: it looked like phishing or an injection attempt" : `Read: ${r.summary || r.subject}`, r.status === "Quarantined" ? "bad" : "");
@@ -126,61 +126,7 @@ export function openPasteEmail(eventId, onDone) {
       await onDone(r);
     } catch (ex) {
       err.innerHTML = `<p class="small" style="color:var(--red)">${esc(errorText(ex))}</p>`;
-      busy(e.currentTarget, false);
-    }
-  });
-}
-
-// ---------- Import from Gmail (read-only, through the course Gmail MCP server) ----------
-export async function openGmailImport(eventId, onDone, eventName = "") {
-  let st;
-  try { st = await api("/api/connectors/gmail/status"); } catch (err) { toast(err.message, "bad"); return; }
-  const ready = st.available && st.signed_in;
-  const m = modal("Import from Gmail", "Read-only: Stagecraft searches and reads your Gmail through the MCP server. It never sends email.", ready ? `
-    <div><label class="label" for="gm-query">Gmail search</label><input class="input" id="gm-query" value="newer_than:7d">
-      <div class="suggest" style="margin-top:6px">${["newer_than:7d", "is:unread newer_than:3d", eventName ? `"${eventName}"` : ""].filter(Boolean)
-        .map((q) => `<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>
-    <div style="max-width:200px"><label class="label" for="gm-max">At most</label><input class="input" id="gm-max" type="number" min="1" max="25" value="10"></div>
-    <p class="tiny faint">${icon("shield")} Each email passes the injection firewall before any AI reads it. Emails you already imported are skipped.</p>
-    <div id="gm-error"></div>
-    <div class="row" style="justify-content:flex-end"><button class="btn" data-cancel>Cancel</button><button class="btn primary" id="gm-go">${icon("mail")} Import and read</button></div>` : `
-    <div class="small" style="background:var(--bg-subtle);border-radius:10px;padding:12px 14px">${esc(st.note)} Until then the event uses its demo inbox, and you can paste emails in.</div>
-    ${st.available ? `<ol class="small" style="margin:0;padding-left:18px">${st.setup_steps.map((s) => `<li style="margin-bottom:4px">${esc(s)}</li>`).join("")}</ol>
-      <div><label class="label">Login command (run once in a terminal)</label><div class="mail-body" style="font-family:ui-monospace,Menlo,monospace;font-size:12px">${esc(st.login_command)}</div>
-        <button class="btn plain sm" id="gm-copy" style="margin-top:4px">${icon("copy")} Copy command</button></div>
-      <p class="tiny faint">OAuth client file: ${st.credentials_file_present ? "found" : "not found yet"} · Signed in: no</p>` : ""}
-    <div id="gm-error"></div>
-    <div class="row" style="justify-content:flex-end"><button class="btn" data-cancel>Close</button>${st.available ? `<button class="btn" id="gm-check">Test connection</button>` : ""}</div>`);
-  m.el.querySelector("[data-cancel]").addEventListener("click", m.close);
-  const err = m.el.querySelector("#gm-error");
-  m.el.querySelector("#gm-copy")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(st.login_command); toast("Copied"); } catch { toast("Copy isn't available here", "bad"); }
-  });
-  m.el.querySelector("#gm-check")?.addEventListener("click", async (e) => {
-    busy(e.currentTarget, true, "Testing…");
-    try {
-      const r = await post("/api/connectors/gmail/check");
-      err.innerHTML = `<p class="small" style="color:${r.ok ? "var(--green)" : "var(--red)"}">${esc(r.reason)}</p>`;
-      if (r.ok) { m.close(); openGmailImport(eventId, onDone, eventName); return; }
-    } catch (ex) { err.innerHTML = `<p class="small" style="color:var(--red)">${esc(ex.message)}</p>`; }
-    busy(e.currentTarget, false);
-  });
-  m.el.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => { m.el.querySelector("#gm-query").value = b.dataset.q; }));
-  m.el.querySelector("#gm-go")?.addEventListener("click", async (e) => {
-    const query = m.el.querySelector("#gm-query").value.trim();
-    const max = Math.min(25, Math.max(1, Number(m.el.querySelector("#gm-max").value) || 10));
-    if (!query) { err.innerHTML = `<p class="small" style="color:var(--red)">Add a Gmail search, like newer_than:7d.</p>`; return; }
-    busy(e.currentTarget, true, "Importing and reading…");
-    try {
-      const r = await post(`/api/events/${encodeURIComponent(eventId)}/gmail/sync`, { query, max_results: max });
-      const p = r.processing;
-      toast(r.imported ? `Imported ${r.imported} email${r.imported === 1 ? "" : "s"}${p ? `: ${p.needs_reply} need a reply, ${p.flags_raised} flags${p.quarantined ? `, ${p.quarantined} quarantined` : ""}` : ""}`
-        : `No new emails (${r.found} found, all already imported)`);
-      m.close();
-      await onDone(r);
-    } catch (ex) {
-      err.innerHTML = `<p class="small" style="color:var(--red)">${esc(errorText(ex))}</p>`;
-      busy(e.currentTarget, false);
+      busy(e.target.closest("button"), false);
     }
   });
 }

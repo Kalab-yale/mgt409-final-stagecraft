@@ -180,13 +180,31 @@ class Initiative(BaseModel):
     blocked: bool = False
 
 
+TeamName = Literal["Leadership", "Program", "Venue and logistics", "Food", "Registration", "Sponsorship and budget", "Marketing", "Volunteers"]
+
+
+class TeamMember(BaseModel):
+    """Someone on the organizing team. One member per event can be the PMO (runs the plan, chases owners)."""
+
+    id: str
+    event_id: str
+    name: str = Field(min_length=1, max_length=80)
+    email: str = ""
+    role: str = ""  # e.g. "Program lead", "Volunteer"
+    team: TeamName = "Volunteers"
+    is_pmo: bool = False
+    access: Literal["Lead", "Member"] = "Member"  # leads (and the PMO) can approve budget changes
+    source: Source = "seed"
+
+
 class Task(BaseModel):
     id: str
     event_id: str
     title: str
     dimension: Dimension
     initiative_id: str | None = None
-    owner: str = ""
+    owner: str = ""  # display text, kept in sync with `assignees` (names, comma-separated)
+    assignees: list[str] = Field(default_factory=list)  # team member ids; a task can belong to several people
     due_date: date | None = None
     status: Literal["To Do", "In Progress", "Done", "Blocked"] = "To Do"
     priority: Literal["High", "Medium", "Low"] = "Medium"

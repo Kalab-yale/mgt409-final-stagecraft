@@ -23,6 +23,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from backend import changes, planning, security, tokenomics
 from backend import database as db
+from backend import notify
 from backend.agents.assistants import (
     GENERIC_WRITES,
     AssistantDeps,
@@ -72,9 +73,11 @@ For the email, decide:
 - flags: risks or decisions the organizer must see, e.g. a cancellation, a price increase, a deadline moved earlier,
   a travel risk to a session, a facility problem, an allergy or safety need. FYI and Noise get no flags. At most 3.
 - Draft the data changes the email implies with the propose_* tools, using ids from the snapshot. Only for concrete
-  facts in the email: a deadline that moved, a new quote or contract value, a cancelled speaker (a task to find a
-  replacement), a dietary need for an attendee you can find. Don't invent changes. Drafts are NOT saved until the
-  organizer confirms. If a propose_* tool returns an error, fix it once or skip it.
+  facts in the email: a deadline that moved, a new quote or contract value, a cancelled speaker, a dietary need for an
+  attendee you can find. When the email creates follow-up work for the team (a cancelled speaker needs a replacement,
+  a new quote needs approval), also propose_create a task for it, owned by the person who owns that area if the snapshot
+  shows one. Don't invent changes. Drafts are NOT saved until the organizer confirms. If a propose_* tool returns an
+  error, fix it once or skip it.
 - reply_draft: if the sender needs an answer, a short, warm, specific reply signed "The {event} team". Never promise
   money or make commitments the organizer hasn't approved; say you'll confirm.
 
@@ -132,8 +135,10 @@ def _save_flag(event_id: str, message_id: str, title: str, detail: str, severity
     if any(f.source_ref == message_id and f.title == title for f in db.list_records("flags", event_id)):
         return None
     fid = f"flg_{uuid.uuid4().hex[:10]}"
-    db.insert_records("flags", [Flag(id=fid, event_id=event_id, title=title, detail=detail, severity=severity, dimension=dimension,
-                                     source="inbox", source_ref=message_id, created_at=_now())])
+    flag = Flag(id=fid, event_id=event_id, title=title, detail=detail, severity=severity, dimension=dimension,
+                source="inbox", source_ref=message_id, created_at=_now())
+    db.insert_records("flags", [flag])
+    notify.flag_raised(event_id, flag)  # Critical/High only, to the event's leads
     return fid
 
 

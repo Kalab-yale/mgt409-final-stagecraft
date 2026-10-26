@@ -4,6 +4,7 @@ import { icon } from "./icons.js";
 
 const SUGGEST = {
   overview: ["What should I focus on today?", "Summarize the red flags", "What's due this week?"],
+  team: ["Who is overloaded right now?", "Assign the AV quote approval to Malik and Chris", "Add Dana Lee to the volunteers team"],
   program: ["Which speakers are still travelling?", "Is anyone double-booked?", "Move the AI Agents panel to Zhang Auditorium"],
   venue: ["Which rooms are close to capacity?", "Is the weather a travel risk?", "Which vendor contracts are unsigned?"],
   food: ["What's our dietary breakdown?", "When is the final headcount due?", "What if lunch runs 30 minutes late?"],
@@ -13,9 +14,12 @@ const SUGGEST = {
 };
 
 let chat = { eventId: null, tab: null, onChanged: () => {}, el: null };
+let canApproveBudget = true;  // set from the planning payload's `me` (leads and the PMO approve money changes)
+export const setApprover = (me) => { canApproveBudget = !me || me.can_approve_budget; };
+const touchesBudget = (c) => c.payload?.table === "budget_items" || (c.payload?.table === "vendors" && (c.diff || []).some((d) => d.field === "contract_value_usd"));
 
 // ---------- change cards ----------
-const LABELS = { due_date: "Due date", planned_usd: "Planned", actual_usd: "Spent", contract_value_usd: "Contract value",
+const LABELS = { assignees: "Owners", is_pmo: "PMO", due_date: "Due date", planned_usd: "Planned", actual_usd: "Spent", contract_value_usd: "Contract value",
                  contract_status: "Contract", rsvp_status: "RSVP", attendee_type: "Type", late_penalty_usd: "Late penalty",
                  hard_cutoff_time: "Must be served by", scheduled_time: "Service time", expected_attendance: "Expected attendance" };
 const label = (f) => LABELS[f] || f.charAt(0).toUpperCase() + f.slice(1).replaceAll("_", " ");
@@ -27,17 +31,20 @@ const value = (f, v) => {
 };
 
 export function changeCard(c, { showOrigin = true } = {}) {
-  const rows = (c.diff || []).filter((d) => !["event_id", "source", "created_at"].includes(d.field)).slice(0, 6).map((d) => d.before === null || d.before === undefined
+  const hasOwners = (c.diff || []).some((d) => d.field === "assignees");
+  const rows = (c.diff || []).filter((d) => !["event_id", "source", "created_at"].includes(d.field) && !(hasOwners && d.field === "owner")).slice(0, 6).map((d) => d.before === null || d.before === undefined
     ? `<span class="f">${esc(label(d.field))}</span><span class="new">${esc(value(d.field, d.after))}</span>`
     : `<span class="f">${esc(label(d.field))}</span><span><span class="old">${esc(value(d.field, d.before))}</span> → <span class="new">${esc(value(d.field, d.after))}</span></span>`).join("");
-  const origin = (c.origin || "").startsWith("inbox:") ? "From an email" : `${esc(TABS.find((t) => t.id === c.tab)?.label || c.tab)} assistant`;
+  const origin = (c.origin || "").startsWith("inbox:") ? "From an email" : c.origin === "meeting_notes" ? "From meeting notes" : `${esc(TABS.find((t) => t.id === c.tab)?.label || c.tab)} assistant`;
   return `
     <div class="change" data-change="${esc(c.id)}">
       <div class="row-between"><span class="pill blue">Waiting for your OK</span>${showOrigin ? `<span class="tiny faint">${origin}</span>` : ""}</div>
       <div class="what" style="margin-top:6px">${esc(c.summary.split(":")[0])}</div>
       ${rows ? `<div class="diff">${rows}</div>` : ""}
       ${c.reason ? `<p class="small muted" style="margin-bottom:8px">Why: ${esc(c.reason)}</p>` : ""}
-      <div class="row"><button class="btn primary sm" data-act="confirm">${icon("check")} Confirm</button><button class="btn sm" data-act="discard">Discard</button></div>
+      ${touchesBudget(c) && !canApproveBudget
+        ? `<div class="row"><button class="btn primary sm" disabled title="Only the PMO or an event lead can approve budget changes">${icon("lock")} Needs a lead's OK</button><button class="btn sm" data-act="discard">Discard</button></div>`
+        : `<div class="row"><button class="btn primary sm" data-act="confirm">${icon("check")} Confirm</button><button class="btn sm" data-act="discard">Discard</button></div>`}
     </div>`;
 }
 

@@ -7,3 +7,7 @@ __pycache__/
 
 # Ad-hoc evidence downloads (the published copy is docs/evidence/)
 stagecraft-evidence-*.json
+
+# Google OAuth client file and the local key that encrypts stored Gmail tokens
+gmail_credentials.json
+backend/.secret_key

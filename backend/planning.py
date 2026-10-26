@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from backend import database as db
+from backend import team as team_mod
 from backend import tools
 from backend.config import demo_today
 from backend.models import DIMENSION_LABELS, Deadline, Initiative, Task
@@ -118,6 +119,19 @@ def compute_system_flags(event_id: str, today: date | None = None) -> list[dict]
         for sp in state.speakers:
             if sp.status != "Confirmed On-Site":
                 flags.append(_flag("travel", sp.id, f"Speaker not on site: {sp.name}", f"{sp.status} ({sp.travel_origin}).", "Program", "Medium"))
+
+    # Team: high-priority work with nobody on it, a team with no PMO, and anyone stretched too thin
+    team = db.list_records("team_members", event_id)
+    for t in db.list_records("tasks", event_id):
+        if t.status != "Done" and t.priority == "High" and not t.assignees:
+            flags.append(_flag("unassigned", t.id, f"Nobody owns: {t.title}", "High-priority task with no one assigned. Assign it on the Team tab.",
+                               t.dimension, "High" if days_out <= 14 else "Medium"))
+    if team and not any(m.is_pmo for m in team):
+        flags.append(_flag("nopmo", event_id, "No PMO on the team", "Pick one person to run the plan and chase owners (Team tab).", "General", "High"))
+    for m in team_mod.workload(event_id, today)["members"]:
+        if m["stretched"]:
+            flags.append(_flag("stretched", m["id"], f"{m['name']} is stretched thin", f"{m['open_tasks']} open tasks "
+                               f"({m['overdue_tasks']} overdue). Consider sharing or reassigning some.", "General", "Medium"))
     return flags
 
 
@@ -202,6 +216,7 @@ def get_planning_state(event_id: str) -> dict:
                         | {"tasks": [t.model_dump(mode="json") for t in tasks if t.initiative_id == i.id]}
                         for i in db.list_records("initiatives", event_id)],
         "tasks_without_initiative": [t.model_dump(mode="json") for t in tasks if not t.initiative_id],
+        "team": team_mod.workload(event_id, today),
         "attendees": {
             "total": len(attendees),
             "by_status": counts("rsvp_status", attendees),
@@ -221,8 +236,14 @@ def home_cards() -> list[dict]:
     cards = []
     for e in sorted(db.get_events(), key=lambda e: e.date):
         v = venues.get(e.venue_id)
+        today = demo_today()
+        upcoming = [{"title": d.title, "due_date": d.due_date.isoformat(), "status": deadline_status(d, today), "dimension": d.dimension}
+                    for d in sorted(db.list_records("deadlines", e.id), key=lambda d: d.due_date)
+                    if not d.done and (d.due_date - today).days <= 21]
+        people = team_mod.members(e.id)
         cards.append(e.model_dump(mode="json") | {"venue_name": v.name if v else "", "venue_city": v.city if v else ""}
-                     | {"health": event_health(e.id)})
+                     | {"health": event_health(e.id), "upcoming": upcoming,
+                        "team": [{"name": m.name, "email": m.email, "is_pmo": m.is_pmo, "role": m.role} for m in people]})
     return cards
 
 

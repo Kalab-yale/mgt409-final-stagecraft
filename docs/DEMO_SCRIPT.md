@@ -14,7 +14,7 @@ What to click, what to say, and what the audience should notice. Times are cumul
 3. In a second tab, open *AI usage and safety* (top bar) so it's ready for the last section.
 4. **Fallback if the network or model is slow:** every Resolve run is saved. On the Resolve screen, *Recent runs → Open* shows a finished run with its options and messages, so you never have to wait on a live call. The rehearsal (`python scripts/rehearse_demo.py`) leaves several there.
 
-Live model calls in this script: the inbox (about 15 seconds), one assistant question (about 5 seconds), and one Resolve run (about 25 seconds). Total cost is about one cent.
+Live model calls in this script: the inbox (about 15 seconds), one assistant question (about 5 seconds), and one Resolve run (about 25 seconds). Total cost is about one cent. Log in as `test@stagecraft.com` / `password` before you start.
 
 ---
 
@@ -22,13 +22,16 @@ Live model calls in this script: the inbox (about 15 seconds), one assistant que
 
 > "Running a 350-person summit is hundreds of small commitments spread across email, spreadsheets, and people's heads: speakers flying in, a caterer who needs a headcount, an AV contract nobody signed. And on the day, one broken projector means re-planning rooms and messaging ten people in minutes. Stagecraft is an event planner where AI agents keep watch, and a person stays in charge of every change."
 
-## 0:30 Your events (30 seconds)
+## 0:30 Log in and Home (45 seconds)
 
-**Click:** nothing yet. Point at the two event cards.
+**Log in** as `test@stagecraft.com` / `password` (the demo account is an event lead on both events).
 
-> "This is everything I'm running. For the Yale Black Venture Summit: 21 days to go, 26% planned, 7 red flags, 4 of them urgent, and 14 unread emails."
+> "Every organizer has their own login. Home starts with what needs *me*: my tasks across events, the deadlines I own, and the changes waiting for my OK. The bell up here tells me when someone assigns me something or an urgent red flag appears."
 
-**Click:** the *Yale Black Venture Summit (YBVS) 2026* card.
+- Point at the **three-week timeline** (every deadline across both events) and the **event cards**: days to go, % planned, red flags, team.
+- **Click:** the *Yale Black Venture Summit (YBVS) 2026* card, then the **Team** tab for 10 seconds.
+
+> "Here's the organizing team: Chris is the PMO, and you can see who's overloaded. Tasks can belong to several people. Only leads can approve money changes."
 
 > "Each event has a tab per part of the job (program, venue, food, attendees, tasks and budget, inbox), and every tab has its own assistant on the right."
 
@@ -59,9 +62,15 @@ When the toast appears (*"9 need a reply, … 1 quarantined"*):
 
 Optional, if time allows: type **"Mark the speaker bios deadline as done."** Show the change card, then **Confirm**. The deadline ticks off and the activity log records it.
 
-## 3:30 Resolve an issue: three agents hand off (2 minutes)
+Optional, the team side (what our trial users liked most): under **Share and wrap up**, click **Meeting notes to tasks** → **Use sample notes** → **Draft tasks**. Owners come from the roster, dates from "by Friday"; confirm one. Then **Team updates** → **Post an update** → **Draft with AI**, edit a word, and post: everyone on the team gets it in their bell.
 
-**Click:** **Resolve an issue** (header). Click the example **Room 2400 AV Failure + RSVP Surge**, then **Find a fix**. (About 25 seconds.)
+## 3:30 Event day: live mode, then three agents hand off (2 minutes)
+
+**Click:** **Live mode** (event header). Drag the clock to about **14:40**.
+
+> "This is the screen for the day itself: what's on in every room, what's next, who's not here yet, catering cutoffs, and check-in. Before the event it's a rehearsal we can play through."
+
+**Click:** **Something broke** → **A room or AV problem**. Resolve an issue opens with the time and what's on already written in. Edit it to say the projector in Room 2400 died and RSVPs for the AI Agents panel jumped to 118. Or click the example **Room 2400 AV Failure + RSVP Surge**. Then **Find a fix** (about 25 seconds).
 
 > "It's the day of the summit. The projector in Room 2400 dies, and the AI Agents panel starts at 2:45 with 118 people now registered for a 127-seat room. Watch the hand-off: a safety check, then Triage figures out what's affected, Solver proposes fixes, and Comms drafts the messages."
 
@@ -109,5 +118,5 @@ When it finishes:
 | *Can it send email?* | No. Replies and messages are drafts you copy or open in your email app. The Gmail connector is read-only (search and read). |
 | *Why several agents instead of one?* | Each has a narrow job, its own tools, and typed output, which keeps prompts short (cheaper) and makes each step checkable. Triage can't move sessions; Comms can't change the schedule. |
 | *What does it cost?* | About $0.0005 per email, $0.0003 per assistant question, and $0.003 per issue resolved: about $0.50 per event per month at our assumed usage. See `docs/evidence/summary.md`. |
-| *Is my Gmail connected?* | Optional. Stagecraft is an MCP client of the course Gmail server; after a one-time sign-in, *Import from Gmail* pulls matching emails through the same firewall. The demo uses a built-in inbox. |
-| *What doesn't it do yet?* | See *Limits and next steps* in `report.html`: one organizer (no logins or roles), no automatic email polling, and rule-based injection detection that a novel attack could slip past. Layers 2 and 3 still apply if one does. |
+| *Is my Gmail connected?* | Optional. Each organizer connects their own Gmail in the app (read-only, Google sign-in), picks dates and keywords, previews which emails look related, and imports only the ones they tick, through the same firewall. The demo uses a built-in inbox. |
+| *What doesn't it do yet?* | See *Limits and next steps* in `report.html`: every signed-in person sees every event (no per-event access yet), notifications are in-app only, no automatic email polling, and rule-based injection detection that a novel attack could slip past. Layers 2 and 3 still apply if one does. |

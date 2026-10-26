@@ -24,6 +24,7 @@ from backend import changes, planning, security, tokenomics  # noqa: E402
 from backend import database as db  # noqa: E402
 from backend.agents.assistants import AssistantDeps, propose_update  # noqa: E402
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 
 YBVS = "evt_ybvs_2026"
 E = f"/api/events/{YBVS}"
@@ -180,6 +181,7 @@ def part_b(client: TestClient) -> None:
 
 if __name__ == "__main__":
     with TestClient(app) as client:
+        login(client)
         db.reset_demo_db()
         part_a()
         part_b(client)

@@ -1,6 +1,6 @@
 """Run every test suite in order and print a pass/fail table.
 
-    python tests/run_all.py            # all 17 suites (live model calls: 2-10 minutes depending on the gateway cache, under $0.10)
+    python tests/run_all.py            # all 22 suites (live model calls: 2-10 minutes depending on the gateway cache, under $0.10)
     python tests/run_all.py --offline  # only the suites that make no model calls (about 1 minute, $0)
 """
 
@@ -27,6 +27,11 @@ SUITES = [  # (file, makes live model calls?, what it covers)
     ("test_phase3.py", True, "Inbox Watcher, pasted email, Daily Brief"),
     ("test_phase4.py", False, "workspace UI shell, direct edits"),
     ("test_phase5.py", False, "Gmail MCP connector, resolve approval, usage/safety data"),
+    ("test_phase6.py", False, "accounts and login, password storage, team, PMO, assignments"),
+    ("test_phase7.py", False, "security fixes (headers, rate limits, names), account settings, themes"),
+    ("test_phase8.py", False, "My work, notifications, lead-only budget approvals, live mode check-in"),
+    ("test_phase9.py", False, "Connect Gmail in the app (fake Google): sign-in, preview, related, import selected"),
+    ("test_phase10.py", True, "creator runs new events, owner suggestions, team updates, status report, notes->tasks, feedback"),
     ("test_final.py", False, "submission readiness: evidence, docs, dependencies, secrets"),
 ]
 

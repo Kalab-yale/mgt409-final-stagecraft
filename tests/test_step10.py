@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from backend import database as db  # noqa: E402
 from backend.app import app  # noqa: E402
+from _auth import login  # noqa: E402
 
 YBVS = "evt_ybvs_2026"
 AI_PANEL = "ses_ybvs_09"
@@ -121,5 +122,6 @@ def run(client: TestClient) -> None:
 
 if __name__ == "__main__":
     with TestClient(app) as client:
+        login(client)
         run(client)
     print("\nPASS - Step 10 verified.")
