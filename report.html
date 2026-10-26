@@ -70,7 +70,7 @@
 <h1>Stagecraft AI: an agentic planner for conferences and summits</h1>
 <p class="lead">Stagecraft keeps a conference's whole plan in one place. AI agents read the organizer's email, flag what's slipping, and re-plan the schedule in under 30 seconds when something breaks on the day. A person approves every change.</p>
 <p class="meta"><b>Kalab Dagem</b> · MGT 409 AI Foundations for Managers · Fall 2026 · Final project<br>
-GitHub: <a href="https://github.com/Kalab-yale/mgt409-final-stagecraft">https://github.com/Kalab-yale/mgt409-final-stagecraft</a> · Runs locally from a fresh clone (see the README); not hosted online.</p>
+<b>GitHub (public repo, clone this to grade):</b> <a href="https://github.com/Kalab-yale/mgt409-final-stagecraft">https://github.com/Kalab-yale/mgt409-final-stagecraft</a> · Runs locally from a fresh clone (see the README); not hosted online.</p>
 
 <div class="kpis">
   <div class="kpi"><div class="v">~26 s</div><div class="l">to turn a day-of problem into two verified fixes plus messages (median of 17 runs)</div></div>
@@ -413,12 +413,7 @@ GitHub: <a href="https://github.com/Kalab-yale/mgt409-final-stagecraft">https://
 </ol>
 
 <h2><span class="n">A</span>Appendix: run it and check the numbers</h2>
-<p>Fresh clone (tested on Python 3.12 and 3.14, about 30 seconds to install): <code>python3 -m venv .venv &amp;&amp; source .venv/bin/activate &amp;&amp; pip install -r requirements.txt &amp;&amp; python main.py</code>, then open http://127.0.0.1:8000 and log in as <code>test@stagecraft.com</code> / <code>password</code> (or create an account). The app reads <code>.env</code> from its own folder first, then the folder above.</p>
-<p>Supporting commands:</p>
-<ul>
-  <li><code>python tests/run_all.py</code> runs all 20 test suites (<code>--offline</code> for the 11 that make no model calls).</li>
-  <li><code>python scripts/rehearse_demo.py</code> re-runs the demo story and regenerates <code>docs/evidence/</code>.</li>
-</ul>
+<p>Fresh clone (Python 3.12 or 3.14, ~30 s install; <code>.env</code> in this folder or the one above): <code>git clone https://github.com/Kalab-yale/mgt409-final-stagecraft.git &amp;&amp; cd mgt409-final-stagecraft &amp;&amp; python3 -m venv .venv &amp;&amp; source .venv/bin/activate &amp;&amp; pip install -r requirements.txt &amp;&amp; python main.py</code>, open http://127.0.0.1:8000, and log in as <code>test@stagecraft.com</code> / <code>password</code>. <code>python tests/run_all.py</code> runs all 22 test suites (<code>--offline</code>: the 12 with no model calls); <code>python scripts/rehearse_demo.py</code> regenerates <code>docs/evidence/</code>.</p>
 <p>Every number in this report comes from <code>docs/evidence/stagecraft-evidence.json</code> or <code>docs/evidence/screenshot_runs.json</code>; a test checks that the headline figures match.</p>
 </main>
 </body>
